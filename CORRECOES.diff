@@ -1,7 +1,7 @@
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/RELATORIO_AUDITORIA.md /tmp/acade/academica/RELATORIO_AUDITORIA.md
 --- /tmp/orig/academica/RELATORIO_AUDITORIA.md	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/acade/academica/RELATORIO_AUDITORIA.md	2026-09-11 16:00:32.146604929 +0000
-@@ -0,0 +1,174 @@
++++ /tmp/acade/academica/RELATORIO_AUDITORIA.md	2026-09-11 16:38:53.270275896 +0000
+@@ -0,0 +1,192 @@
 +# Relatório de Auditoria Técnica — Mustangs Atlética / AcadeConnect
 +
 +Auditoria completa (frontend, backend, banco e QR Code) com **correção de bugs** e **testes de ponta a ponta** executados em ambiente real (PostgreSQL 15 + Node 22 + React/Vite).
@@ -30,6 +30,8 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
 +| 12 | **Baixa** | **`updateInstitution` / `updateSpeaker` repassavam `req.body` inteiro ao Prisma** (mesma classe do bug #1: erro de validação e save descartado). | Leitura + teste de padrão |
 +| 13 | **Média** | **`registrationEnd` gravado à meia-noite no create.** O Joi convertia a data para `Date` antes do controller, e o `endOfDay: true` era perdido. Resultado: o prazo final fechava no **início** do dia no create e no **fim** do dia no update (janela de inscrição inconsistente). | `create` → `2026-03-10T00:00:00Z`; `update` → `2026-04-30T23:59:59.999Z` |
 +| 14 | **Média** | **Comparação de datas por INSTANTE em vez de DIA DE CALENDÁRIO.** No calendário do dashboard e em “Próxima atividade”, um evento de segunda (gravado como meia-noite UTC) caía no **domingo** em UTC-3, e uma atividade de **hoje** não aparecia como próxima. No detalhe do evento, as atividades eram agrupadas pelo dia local, podendo separar/juntar dias diferente do exibido. | `new Date(startDate) >= weekStart` (local) deslocava o dia |
++| 15 | **Crítica** | **QR Code exibido codificava a IMAGEM, não o token.** `QRCodeCard` usava `react-qr-code` com o **data URL PNG** devolvido pelo backend. O QR lido pela câmera continha `data:image/png;base64,...` em vez do token `AC...` → a validação falhava sempre. | `QRCodeCard value={qrCode}` (data URL) |
++| 16 | **Alta** | **Código manual não funcionava.** O endpoint de scan só aceitava o `qrToken` (que o participante não conhece). Digitar o código da inscrição (`EVT-2026-000123`) retornava 404. | `POST /attendance/scan { code }` → 404 |
 +
 +---
 +
@@ -49,6 +51,11 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
 +- **`EventDetail.jsx`** — programação agrupada por **dia de calendário** (UTC), igual ao dia exibido.
 +- **`MinhaArea.jsx`** — “Próxima atividade” compara dias de calendário (inclui o **hoje**) e ordena por dia + horário.
 +- **`registrationController.js`** — ano do código de inscrição usa `getUTCFullYear` (evita virada de ano em 31/12 em UTC-3).
++- **`components/Cards.jsx` (`QRCodeCard`)** — codifica o **token** no QR; se receber um data URL, renderiza como imagem (nunca realimenta o data URL no encoder).
++- **`InscricaoDetail.jsx` / `EventDetail.jsx`** — passam `registration.qrToken` para o QR (o valor que o backend valida).
++- **`attendanceService.js`** — `findRegistrationByScan()` resolve por **token (case-sensitive)** ou **código da inscrição (normalizado em maiúsculas)**; registra `method` QR_CODE/MANUAL; duplicidade devolve `details.recordedAt`.
++- **`attendanceController.js` + `validations/schemas.js`** — scan/validate aceitam `qrToken` **ou** `code` (normalização e rejeição no backend).
++- **`api/services.js`** — envio do código manual; **`AdminOperador.jsx`** — placeholder do campo manual indica o código da inscrição.
 +- **`adminController.updateInstitution` / `speakerController.updateSpeaker`** — whitelist de campos.
 +- **`frontend/api/client.js` + `services.js`** — expõem `API_BASE_URL`; `downloadUrl` respeita `VITE_API_URL`.
 +- **`AdminEventoForm`** — `toForm` envia apenas campos editáveis (defesa extra).
@@ -151,7 +158,15 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
 +- **Atualização** só grava colunas permitidas; campos relacionais/calculados são descartados.
 +- Fuso de referência dos testes: **America/Sao_Paulo (UTC-3)**.
 +
-+## Arquivos alterados (21)
++## 10. QR Code e código manual (correção crítica)
++
++- **QR Code**: gerado a partir de `Registration.qrToken` (opaco, `AC` + 48 hex, persistido e determinístico). O frontend codifica o **token**; o data URL do servidor deixou de ser realimentado no encoder. O QR continua válido após reload, logout/login (o token está no banco).
++- **Código manual**: o operador pode digitar o código da inscrição (`EVT-2026-000123`). O backend normaliza (trim + maiúsculas), tenta primeiro o token e depois o código, e rejeita códigos vazios/inválidos.
++- **Validação no evento correto**: `activity.eventId !== registration.eventId` → 409 (não é possível usar código de um evento em outro).
++- **Duplicidade**: verificação + constraint única `@@unique([registrationId, activityId])`; resposta 409 com `details.recordedAt`. Concorrência testada (duas chamadas simultâneas → 1 registro).
++- **Segurança**: rotas de scan/validate exigem ADMIN/ORGANIZER (401 sem login, 403 para participante); nada sensível no QR.
++
++## Arquivos alterados (24)
 +
 +```
 +backend/src/controllers/eventController.js
@@ -165,10 +180,13 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
 +backend/src/services/certificateService.js
 +backend/src/utils/pdf.js
 +backend/src/utils/date.js
++backend/src/validations/schemas.js
 +frontend/src/api/client.js
 +frontend/src/api/services.js
 +frontend/src/utils/format.js
++frontend/src/components/Cards.jsx
 +frontend/src/pages/EventDetail.jsx
++frontend/src/pages/participant/InscricaoDetail.jsx
 +frontend/src/pages/participant/MinhaArea.jsx
 +frontend/src/pages/admin/AdminDashboard.jsx
 +frontend/src/pages/admin/AdminEventoForm.jsx
@@ -196,8 +214,64 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
  
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/attendanceController.js /tmp/acade/academica/backend/src/controllers/attendanceController.js
 --- /tmp/orig/academica/backend/src/controllers/attendanceController.js	2026-09-09 14:20:48.000000000 +0000
-+++ /tmp/acade/academica/backend/src/controllers/attendanceController.js	2026-09-11 15:10:53.095198739 +0000
-@@ -71,6 +71,30 @@
++++ /tmp/acade/academica/backend/src/controllers/attendanceController.js	2026-09-11 16:37:28.477615928 +0000
+@@ -2,7 +2,7 @@
+ import { ApiError } from '../utils/apiError.js';
+ import { apiResponse } from '../utils/apiResponse.js';
+ import { asyncHandler } from '../utils/asyncHandler.js';
+-import { registerAttendanceByQr, setManualAttendance } from '../services/attendanceService.js';
++import { registerAttendanceByQr, setManualAttendance, findRegistrationByScan } from '../services/attendanceService.js';
+ import { createAuditLog } from '../services/auditLogService.js';
+ 
+ /**
+@@ -10,25 +10,37 @@
+  * Backend validates everything and records presence.
+  */
+ export const registerByQr = asyncHandler(async (req, res) => {
+-  const { qrToken, activityId } = req.body;
++  const { qrToken, code, activityId } = req.body;
++  // Camera sends the QR token; manual entry sends the registration code. The
++  // method reflects which one was used (both are validated by the backend).
++  const usedToken = Boolean(String(qrToken || '').trim());
+   const result = await registerAttendanceByQr({
+     qrToken,
++    code,
+     activityId,
+     operatorId: req.user.id,
+-    method: 'QR_CODE',
++    method: usedToken ? 'QR_CODE' : 'MANUAL',
+   });
+   return apiResponse(res, { status: 201, message: 'Presença registrada com sucesso!', data: result });
+ });
+ 
+-/** Validate a QR token without recording (for operator confirmation screen). */
++/** Validate a QR token / registration code without recording (confirmation screen). */
+ export const validateQr = asyncHandler(async (req, res) => {
+-  const { qrToken } = req.body;
+-  const registration = await prisma.registration.findUnique({
+-    where: { qrToken },
+-    include: { event: { select: { id: true, name: true } }, user: { select: { id: true, name: true } } },
++  const { qrToken, code } = req.body;
++  const registration = await findRegistrationByScan({ qrToken, code });
++  if (!registration) throw new ApiError(404, 'QR Code ou código de inscrição inválido.');
++  return apiResponse(res, {
++    message: 'Inscrição encontrada.',
++    data: {
++      registration: {
++        id: registration.id,
++        code: registration.code,
++        status: registration.status,
++        event: { id: registration.event.id, name: registration.event.name },
++        user: { id: registration.user.id, name: registration.user.name },
++      },
++    },
+   });
+-  if (!registration) throw new ApiError(404, 'QR Code inválido.');
+-  return apiResponse(res, { message: 'Inscrição encontrada.', data: { registration } });
+ });
+ 
+ /**
+@@ -71,6 +83,30 @@
      };
    });
  
@@ -228,7 +302,7 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
    if (search) {
      const q = search.toLowerCase();
      rows = rows.filter(
-@@ -113,10 +137,18 @@
+@@ -113,10 +149,18 @@
    });
  
    const summary = activities.map((a) => {
@@ -481,8 +555,65 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
    await createAuditLog({ userId: req.user.id, action: 'SPEAKER_UPDATED', resource: 'Speaker', resourceId: speaker.id, ip: req.ip });
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/services/attendanceService.js /tmp/acade/academica/backend/src/services/attendanceService.js
 --- /tmp/orig/academica/backend/src/services/attendanceService.js	2026-09-10 18:17:40.000000000 +0000
-+++ /tmp/acade/academica/backend/src/services/attendanceService.js	2026-09-11 15:10:37.563077853 +0000
-@@ -42,11 +42,22 @@
++++ /tmp/acade/academica/backend/src/services/attendanceService.js	2026-09-11 16:37:50.133784487 +0000
+@@ -4,24 +4,49 @@
+ import { createNotification } from './notificationService.js';
+ 
+ /**
++ * Resolve a registration from a scanned QR token OR a manually typed code.
++ * The backend is the single authority: it normalizes the entry, tries the
++ * opaque QR token first (case-sensitive) and then the human code (uppercased).
++ * It never trusts the browser.
++ */
++export async function findRegistrationByScan({ qrToken, code } = {}) {
++  // The value may arrive in either field (camera token or manual code), so we
++  // normalize both and try: exact QR token (case-sensitive) then human code
++  // (uppercased). This makes the backend the single authority regardless of
++  // which input the frontend used.
++  const raw = String(qrToken || code || '').trim();
++  if (!raw) return null;
++  const include = { event: true, user: true, activityRegistrations: true };
++
++  const byToken = await prisma.registration.findUnique({ where: { qrToken: raw }, include });
++  if (byToken) return byToken;
++
++  const byCode = await prisma.registration.findUnique({ where: { code: raw.toUpperCase() }, include });
++  return byCode;
++}
++
++/**
+  * Register (or update) attendance, enforcing ALL business rules server-side.
+  * The frontend never decides success — the backend validates everything.
+  *
+  * @param {object} params
+  * @param {string} params.qrToken - opaque token from the participant's QR code
++ * @param {string} params.code - human-readable registration code (EVT-2026-000123) for manual entry
+  * @param {string} params.activityId - selected activity
+  * @param {string} [params.operatorId] - user performing the registration
+  * @param {AttendanceMethod} [params.method] - QR_CODE | MANUAL | ADMIN | IMPORTACAO
+  */
+-export async function registerAttendanceByQr({ qrToken, activityId, operatorId = null, method = 'QR_CODE' }) {
+-  if (!qrToken) throw new ApiError(400, 'QR Code não fornecido.');
++export async function registerAttendanceByQr({ qrToken, code, activityId, operatorId = null, method = 'QR_CODE' }) {
++  if (!String(qrToken || code || '').trim()) {
++    throw new ApiError(400, 'Informe o QR Code ou o código da inscrição.');
++  }
+ 
+-  const registration = await prisma.registration.findUnique({
+-    where: { qrToken },
+-    include: { event: true, user: true, activityRegistrations: true },
+-  });
++  const registration = await findRegistrationByScan({ qrToken, code });
++  if (!registration) throw new ApiError(404, 'QR Code ou código de inscrição inválido.');
+ 
+-  if (!registration) throw new ApiError(404, 'QR Code inválido.');
++  // Record whether the entry came from the QR token or the manual code.
++  const rawEntry = String(qrToken || code || '').trim();
++  const method2 = rawEntry && rawEntry === registration.qrToken ? 'QR_CODE' : 'MANUAL';
+   if (registration.status !== 'CONFIRMED') {
+     throw new ApiError(409, `Inscrição ${registration.status === 'CANCELLED' ? 'cancelada' : 'pendente'}. Entre em contato com a organização.`);
+   }
+@@ -42,18 +67,32 @@
    }
    if (registration.event.status === 'CANCELLED') throw new ApiError(409, 'Evento cancelado.');
  
@@ -506,7 +637,34 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
  
    // Duplicate check.
    const existing = await prisma.attendance.findUnique({
-@@ -142,6 +153,14 @@
+     where: { registrationId_activityId: { registrationId: registration.id, activityId } },
+   });
+   if (existing && existing.status === 'PRESENT') {
+-    throw new ApiError(409, 'Presença já registrada para esta atividade.');
++    throw new ApiError(409, 'Presença já registrada para esta atividade.', {
++      recordedAt: existing.recordedAt,
++      method: existing.method,
++    });
+   }
+ 
+   const attendance = await prisma.attendance.upsert({
+@@ -64,13 +103,13 @@
+       userId: registration.userId,
+       eventId: registration.eventId,
+       status: 'PRESENT',
+-      method,
++      method: method2,
+       recordedAt: new Date(),
+       operatorId,
+     },
+     update: {
+       status: 'PRESENT',
+-      method,
++      method: method2,
+       recordedAt: new Date(),
+       operatorId,
+     },
+@@ -142,6 +181,14 @@
    }
    if (registration.event.status === 'CANCELLED') throw new ApiError(409, 'Evento cancelado.');
  
@@ -633,6 +791,32 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
  }
  
  function formatNumber(n) {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/validations/schemas.js /tmp/acade/academica/backend/src/validations/schemas.js
+--- /tmp/orig/academica/backend/src/validations/schemas.js	2026-09-10 15:19:10.000000000 +0000
++++ /tmp/acade/academica/backend/src/validations/schemas.js	2026-09-11 16:37:33.189652604 +0000
+@@ -124,13 +124,19 @@
+ 
+ export const attendanceSchemas = {
+   scan: {
++    // Accepts either the opaque QR token (camera) or the human registration
++    // code (manual entry: EVT-2026-000123). Backend normalization is final.
+     body: Joi.object({
+-      qrToken: Joi.string().required().messages({ 'any.required': 'QR Code não fornecido.' }),
++      qrToken: Joi.string().trim().max(200).allow('', null),
++      code: Joi.string().trim().max(120).allow('', null),
+       activityId: Joi.string().required(),
+-    }),
++    }).or('qrToken', 'code'),
+   },
+   validate: {
+-    body: Joi.object({ qrToken: Joi.string().required() }),
++    body: Joi.object({
++      qrToken: Joi.string().trim().max(200).allow('', null),
++      code: Joi.string().trim().max(120).allow('', null),
++    }).or('qrToken', 'code'),
+   },
+   manual: {
+     body: Joi.object({
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/api/client.js /tmp/acade/academica/frontend/src/api/client.js
 --- /tmp/orig/academica/frontend/src/api/client.js	2026-09-11 14:18:59.000000000 +0000
 +++ /tmp/acade/academica/frontend/src/api/client.js	2026-09-11 15:11:28.135471472 +0000
@@ -649,14 +833,28 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
  // Attach JWT token from localStorage to every request.
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/api/services.js /tmp/acade/academica/frontend/src/api/services.js
 --- /tmp/orig/academica/frontend/src/api/services.js	2026-09-10 23:15:36.000000000 +0000
-+++ /tmp/acade/academica/frontend/src/api/services.js	2026-09-11 15:11:28.135471472 +0000
++++ /tmp/acade/academica/frontend/src/api/services.js	2026-09-11 16:37:55.093823088 +0000
 @@ -1,4 +1,4 @@
 -import { api, unwrap } from './client.js';
 +import { api, unwrap, API_BASE_URL } from './client.js';
  
  // ---- Auth ----
  export const authApi = {
-@@ -98,7 +98,7 @@
+@@ -84,9 +84,11 @@
+ };
+ 
+ // ---- Attendance ----
++// `value` pode ser o token do QR (câmera) ou o código da inscrição (manual,
++// ex.: EVT-2026-000123). O backend normaliza e resolve (token primeiro, depois código).
+ export const attendanceApi = {
+-  scan: (qrToken, activityId) => api.post('/attendance/scan', { qrToken, activityId }).then(unwrap),
+-  validateQr: (qrToken) => api.post('/attendance/validate', { qrToken }).then(unwrap),
++  scan: (value, activityId) => api.post('/attendance/scan', { code: value, activityId }).then(unwrap),
++  validateQr: (value) => api.post('/attendance/validate', { code: value }).then(unwrap),
+   manual: (registrationId, activityId, present) => api.post('/attendance/manual', { registrationId, activityId, present }).then(unwrap),
+   activityRows: (activityId, params) => api.get(`/attendance/activity/${activityId}`, { params }).then(unwrap),
+   summary: (eventId) => api.get(`/attendance/summary/${eventId}`).then(unwrap),
+@@ -98,7 +100,7 @@
  export const certificateApi = {
    mine: () => api.get('/certificates/me').then(unwrap),
    get: (id) => api.get(`/certificates/${id}`).then(unwrap),
@@ -665,9 +863,28 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
    validate: (code) => api.get(`/certificates/validate/${code}`).then(unwrap),
    issue: (data) => api.post('/certificates/issue', data).then(unwrap),
    auto: (eventId) => api.post(`/certificates/auto/${eventId}`).then(unwrap),
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/components/Cards.jsx /tmp/acade/academica/frontend/src/components/Cards.jsx
+--- /tmp/orig/academica/frontend/src/components/Cards.jsx	2026-09-10 15:26:24.000000000 +0000
++++ /tmp/acade/academica/frontend/src/components/Cards.jsx	2026-09-11 16:37:55.093823088 +0000
+@@ -63,9 +63,14 @@
+ }
+ 
+ export function QRCodeCard({ value, label }) {
++  // `value` must be the raw opaque token (what the backend validates). When a
++  // pre-rendered PNG data URL is supplied instead, display it as an <img> —
++  // never feed the data URL into the QR encoder, or the QR would contain the
++  // base64 image instead of the token and scanning would fail.
++  const isImage = typeof value === 'string' && value.startsWith('data:image');
+   return (
+     <div className="qr-card">
+-      <QRCode value={value} size={220} />
++      {isImage ? <img src={value} alt={label || 'QR Code'} width={220} height={220} /> : <QRCode value={value} size={220} />}
+       {label && <p>{label}</p>}
+     </div>
+   );
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/EventDetail.jsx /tmp/acade/academica/frontend/src/pages/EventDetail.jsx
 --- /tmp/orig/academica/frontend/src/pages/EventDetail.jsx	2026-09-11 14:18:46.000000000 +0000
-+++ /tmp/acade/academica/frontend/src/pages/EventDetail.jsx	2026-09-11 15:59:21.522055251 +0000
++++ /tmp/acade/academica/frontend/src/pages/EventDetail.jsx	2026-09-11 16:37:58.809852014 +0000
 @@ -7,7 +7,7 @@
  import { useToast } from '../context/ToastContext';
  import { Button, Spinner, ErrorState, StatusBadge, Checkbox, SmartImage } from '../components/ui';
@@ -689,6 +906,15 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
      (acc[key] = acc[key] || []).push(a);
      return acc;
    }, {});
+@@ -154,7 +157,7 @@
+                     <CheckCircle2 size={40} color="var(--success)" />
+                     <strong>Inscrição realizada com sucesso!</strong>
+                     <span>Inscrição #{confirmation.registration.code}</span>
+-                    <QRCodeCard value={confirmation.qrCode} label="Apresente este QR Code no evento" />
++                    <QRCodeCard value={confirmation.registration?.qrToken || confirmation.qrCode} label="Apresente este QR Code no evento" />
+                     <Link className="btn btn--primary btn--block" to={`/inscricao/${confirmation.registration.id}`}>Ver minha inscrição</Link>
+                   </div>
+                 ) : canRegister ? (
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminAtividades.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminAtividades.jsx
 --- /tmp/orig/academica/frontend/src/pages/admin/AdminAtividades.jsx	2026-09-10 23:15:42.000000000 +0000
 +++ /tmp/acade/academica/frontend/src/pages/admin/AdminAtividades.jsx	2026-09-11 15:11:38.951555655 +0000
@@ -809,7 +1035,7 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
  
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminOperador.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminOperador.jsx
 --- /tmp/orig/academica/frontend/src/pages/admin/AdminOperador.jsx	2026-09-10 15:27:32.000000000 +0000
-+++ /tmp/acade/academica/frontend/src/pages/admin/AdminOperador.jsx	2026-09-11 15:15:33.373380225 +0000
++++ /tmp/acade/academica/frontend/src/pages/admin/AdminOperador.jsx	2026-09-11 16:37:58.809852014 +0000
 @@ -19,6 +19,7 @@
    const [found, setFound] = useState(null);
    const [busy, setBusy] = useState(false);
@@ -876,7 +1102,7 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
        setScanning(false);
      }
    };
-@@ -131,21 +140,21 @@
+@@ -131,25 +140,25 @@
        </div>
  
        <div className="card card-pad mb-3">
@@ -908,6 +1134,11 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
          )}
  
          <form className="operator__manual" onSubmit={handleManualSubmit}>
+-          <Input value={manualCode} onChange={(e) => setManualCode(e.target.value)} placeholder="Ou digite o código do QR (ou token)" aria-label="Código do QR" />
++          <Input value={manualCode} onChange={(e) => setManualCode(e.target.value)} placeholder="Ou digite o código da inscrição (ex.: EVT-2026-000123)" aria-label="Código da inscrição" />
+           <Button type="submit" variant="secondary"><Keyboard size={16} /> Validar</Button>
+         </form>
+       </div>
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminTelao.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminTelao.jsx
 --- /tmp/orig/academica/frontend/src/pages/admin/AdminTelao.jsx	2026-09-09 14:36:48.000000000 +0000
 +++ /tmp/acade/academica/frontend/src/pages/admin/AdminTelao.jsx	2026-09-11 15:15:33.373380225 +0000
@@ -985,6 +1216,19 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
          </>
        )}
      </div>
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/participant/InscricaoDetail.jsx /tmp/acade/academica/frontend/src/pages/participant/InscricaoDetail.jsx
+--- /tmp/orig/academica/frontend/src/pages/participant/InscricaoDetail.jsx	2026-09-11 12:07:36.000000000 +0000
++++ /tmp/acade/academica/frontend/src/pages/participant/InscricaoDetail.jsx	2026-09-11 16:37:58.809852014 +0000
+@@ -172,7 +172,8 @@
+       <Modal open={showQr} onClose={() => setShowQr(false)} title="Meu QR Code" footer={<Link className="btn btn--primary btn--block" to={`/inscricao/${registration.id}`}>Confirmar</Link>}>
+         <div style={{ textAlign: 'center' }}>
+           <p className="text-muted mb-2">Apresente este QR Code na entrada das atividades para registrar presença.</p>
+-          <QRCodeCard value={qrCode} label={`Inscrição #${registration.code}`} />
++          {/* Encode the raw opaque token so scanners send the token (not the PNG data URL). */}
++          <QRCodeCard value={registration.qrToken || qrCode} label={`Inscrição #${registration.code}`} />
+         </div>
+       </Modal>
+     </>
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/participant/MinhaArea.jsx /tmp/acade/academica/frontend/src/pages/participant/MinhaArea.jsx
 --- /tmp/orig/academica/frontend/src/pages/participant/MinhaArea.jsx	2026-09-09 14:33:40.000000000 +0000
 +++ /tmp/acade/academica/frontend/src/pages/participant/MinhaArea.jsx	2026-09-11 15:59:27.418101142 +0000

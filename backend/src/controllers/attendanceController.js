@@ -2,7 +2,7 @@ import { prisma } from '../config/prisma.js';
 import { ApiError } from '../utils/apiError.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { registerAttendanceByQr, setManualAttendance } from '../services/attendanceService.js';
+import { registerAttendanceByQr, setManualAttendance, findRegistrationByScan } from '../services/attendanceService.js';
 import { createAuditLog } from '../services/auditLogService.js';
 
 /**
@@ -10,25 +10,37 @@ import { createAuditLog } from '../services/auditLogService.js';
  * Backend validates everything and records presence.
  */
 export const registerByQr = asyncHandler(async (req, res) => {
-  const { qrToken, activityId } = req.body;
+  const { qrToken, code, activityId } = req.body;
+  // Camera sends the QR token; manual entry sends the registration code. The
+  // method reflects which one was used (both are validated by the backend).
+  const usedToken = Boolean(String(qrToken || '').trim());
   const result = await registerAttendanceByQr({
     qrToken,
+    code,
     activityId,
     operatorId: req.user.id,
-    method: 'QR_CODE',
+    method: usedToken ? 'QR_CODE' : 'MANUAL',
   });
   return apiResponse(res, { status: 201, message: 'Presença registrada com sucesso!', data: result });
 });
 
-/** Validate a QR token without recording (for operator confirmation screen). */
+/** Validate a QR token / registration code without recording (confirmation screen). */
 export const validateQr = asyncHandler(async (req, res) => {
-  const { qrToken } = req.body;
-  const registration = await prisma.registration.findUnique({
-    where: { qrToken },
-    include: { event: { select: { id: true, name: true } }, user: { select: { id: true, name: true } } },
+  const { qrToken, code } = req.body;
+  const registration = await findRegistrationByScan({ qrToken, code });
+  if (!registration) throw new ApiError(404, 'QR Code ou código de inscrição inválido.');
+  return apiResponse(res, {
+    message: 'Inscrição encontrada.',
+    data: {
+      registration: {
+        id: registration.id,
+        code: registration.code,
+        status: registration.status,
+        event: { id: registration.event.id, name: registration.event.name },
+        user: { id: registration.user.id, name: registration.user.name },
+      },
+    },
   });
-  if (!registration) throw new ApiError(404, 'QR Code inválido.');
-  return apiResponse(res, { message: 'Inscrição encontrada.', data: { registration } });
 });
 
 /**

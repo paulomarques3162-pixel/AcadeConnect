@@ -158,7 +158,7 @@ export default function AdminOperador() {
         )}
 
         <form className="operator__manual" onSubmit={handleManualSubmit}>
-          <Input value={manualCode} onChange={(e) => setManualCode(e.target.value)} placeholder="Ou digite o código do QR (ou token)" aria-label="Código do QR" />
+          <Input value={manualCode} onChange={(e) => setManualCode(e.target.value)} placeholder="Ou digite o código da inscrição (ex.: EVT-2026-000123)" aria-label="Código da inscrição" />
           <Button type="submit" variant="secondary"><Keyboard size={16} /> Validar</Button>
         </form>
       </div>

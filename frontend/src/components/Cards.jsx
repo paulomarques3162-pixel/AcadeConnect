@@ -63,9 +63,14 @@ export function ActivityCard({ activity }) {
 }
 
 export function QRCodeCard({ value, label }) {
+  // `value` must be the raw opaque token (what the backend validates). When a
+  // pre-rendered PNG data URL is supplied instead, display it as an <img> —
+  // never feed the data URL into the QR encoder, or the QR would contain the
+  // base64 image instead of the token and scanning would fail.
+  const isImage = typeof value === 'string' && value.startsWith('data:image');
   return (
     <div className="qr-card">
-      <QRCode value={value} size={220} />
+      {isImage ? <img src={value} alt={label || 'QR Code'} width={220} height={220} /> : <QRCode value={value} size={220} />}
       {label && <p>{label}</p>}
     </div>
   );

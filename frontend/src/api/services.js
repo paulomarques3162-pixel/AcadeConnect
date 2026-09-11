@@ -84,9 +84,11 @@ export const registrationApi = {
 };
 
 // ---- Attendance ----
+// `value` pode ser o token do QR (câmera) ou o código da inscrição (manual,
+// ex.: EVT-2026-000123). O backend normaliza e resolve (token primeiro, depois código).
 export const attendanceApi = {
-  scan: (qrToken, activityId) => api.post('/attendance/scan', { qrToken, activityId }).then(unwrap),
-  validateQr: (qrToken) => api.post('/attendance/validate', { qrToken }).then(unwrap),
+  scan: (value, activityId) => api.post('/attendance/scan', { code: value, activityId }).then(unwrap),
+  validateQr: (value) => api.post('/attendance/validate', { code: value }).then(unwrap),
   manual: (registrationId, activityId, present) => api.post('/attendance/manual', { registrationId, activityId, present }).then(unwrap),
   activityRows: (activityId, params) => api.get(`/attendance/activity/${activityId}`, { params }).then(unwrap),
   summary: (eventId) => api.get(`/attendance/summary/${eventId}`).then(unwrap),

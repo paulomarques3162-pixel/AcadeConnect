@@ -124,13 +124,19 @@ export const registrationSchemas = {
 
 export const attendanceSchemas = {
   scan: {
+    // Accepts either the opaque QR token (camera) or the human registration
+    // code (manual entry: EVT-2026-000123). Backend normalization is final.
     body: Joi.object({
-      qrToken: Joi.string().required().messages({ 'any.required': 'QR Code não fornecido.' }),
+      qrToken: Joi.string().trim().max(200).allow('', null),
+      code: Joi.string().trim().max(120).allow('', null),
       activityId: Joi.string().required(),
-    }),
+    }).or('qrToken', 'code'),
   },
   validate: {
-    body: Joi.object({ qrToken: Joi.string().required() }),
+    body: Joi.object({
+      qrToken: Joi.string().trim().max(200).allow('', null),
+      code: Joi.string().trim().max(120).allow('', null),
+    }).or('qrToken', 'code'),
   },
   manual: {
     body: Joi.object({

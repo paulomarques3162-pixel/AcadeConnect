@@ -4,24 +4,49 @@ import { createAuditLog } from './auditLogService.js';
 import { createNotification } from './notificationService.js';
 
 /**
+ * Resolve a registration from a scanned QR token OR a manually typed code.
+ * The backend is the single authority: it normalizes the entry, tries the
+ * opaque QR token first (case-sensitive) and then the human code (uppercased).
+ * It never trusts the browser.
+ */
+export async function findRegistrationByScan({ qrToken, code } = {}) {
+  // The value may arrive in either field (camera token or manual code), so we
+  // normalize both and try: exact QR token (case-sensitive) then human code
+  // (uppercased). This makes the backend the single authority regardless of
+  // which input the frontend used.
+  const raw = String(qrToken || code || '').trim();
+  if (!raw) return null;
+  const include = { event: true, user: true, activityRegistrations: true };
+
+  const byToken = await prisma.registration.findUnique({ where: { qrToken: raw }, include });
+  if (byToken) return byToken;
+
+  const byCode = await prisma.registration.findUnique({ where: { code: raw.toUpperCase() }, include });
+  return byCode;
+}
+
+/**
  * Register (or update) attendance, enforcing ALL business rules server-side.
  * The frontend never decides success — the backend validates everything.
  *
  * @param {object} params
  * @param {string} params.qrToken - opaque token from the participant's QR code
+ * @param {string} params.code - human-readable registration code (EVT-2026-000123) for manual entry
  * @param {string} params.activityId - selected activity
  * @param {string} [params.operatorId] - user performing the registration
  * @param {AttendanceMethod} [params.method] - QR_CODE | MANUAL | ADMIN | IMPORTACAO
  */
-export async function registerAttendanceByQr({ qrToken, activityId, operatorId = null, method = 'QR_CODE' }) {
-  if (!qrToken) throw new ApiError(400, 'QR Code não fornecido.');
+export async function registerAttendanceByQr({ qrToken, code, activityId, operatorId = null, method = 'QR_CODE' }) {
+  if (!String(qrToken || code || '').trim()) {
+    throw new ApiError(400, 'Informe o QR Code ou o código da inscrição.');
+  }
 
-  const registration = await prisma.registration.findUnique({
-    where: { qrToken },
-    include: { event: true, user: true, activityRegistrations: true },
-  });
+  const registration = await findRegistrationByScan({ qrToken, code });
+  if (!registration) throw new ApiError(404, 'QR Code ou código de inscrição inválido.');
 
-  if (!registration) throw new ApiError(404, 'QR Code inválido.');
+  // Record whether the entry came from the QR token or the manual code.
+  const rawEntry = String(qrToken || code || '').trim();
+  const method2 = rawEntry && rawEntry === registration.qrToken ? 'QR_CODE' : 'MANUAL';
   if (registration.status !== 'CONFIRMED') {
     throw new ApiError(409, `Inscrição ${registration.status === 'CANCELLED' ? 'cancelada' : 'pendente'}. Entre em contato com a organização.`);
   }
@@ -64,7 +89,10 @@ export async function registerAttendanceByQr({ qrToken, activityId, operatorId =
     where: { registrationId_activityId: { registrationId: registration.id, activityId } },
   });
   if (existing && existing.status === 'PRESENT') {
-    throw new ApiError(409, 'Presença já registrada para esta atividade.');
+    throw new ApiError(409, 'Presença já registrada para esta atividade.', {
+      recordedAt: existing.recordedAt,
+      method: existing.method,
+    });
   }
 
   const attendance = await prisma.attendance.upsert({
@@ -75,13 +103,13 @@ export async function registerAttendanceByQr({ qrToken, activityId, operatorId =
       userId: registration.userId,
       eventId: registration.eventId,
       status: 'PRESENT',
-      method,
+      method: method2,
       recordedAt: new Date(),
       operatorId,
     },
     update: {
       status: 'PRESENT',
-      method,
+      method: method2,
       recordedAt: new Date(),
       operatorId,
     },

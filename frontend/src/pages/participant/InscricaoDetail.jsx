@@ -172,7 +172,8 @@ export default function InscricaoDetail() {
       <Modal open={showQr} onClose={() => setShowQr(false)} title="Meu QR Code" footer={<Link className="btn btn--primary btn--block" to={`/inscricao/${registration.id}`}>Confirmar</Link>}>
         <div style={{ textAlign: 'center' }}>
           <p className="text-muted mb-2">Apresente este QR Code na entrada das atividades para registrar presença.</p>
-          <QRCodeCard value={qrCode} label={`Inscrição #${registration.code}`} />
+          {/* Encode the raw opaque token so scanners send the token (not the PNG data URL). */}
+          <QRCodeCard value={registration.qrToken || qrCode} label={`Inscrição #${registration.code}`} />
         </div>
       </Modal>
     </>

@@ -26,6 +26,8 @@ Foram reproduzidos em execução real (não apenas por leitura de código):
 | 12 | **Baixa** | **`updateInstitution` / `updateSpeaker` repassavam `req.body` inteiro ao Prisma** (mesma classe do bug #1: erro de validação e save descartado). | Leitura + teste de padrão |
 | 13 | **Média** | **`registrationEnd` gravado à meia-noite no create.** O Joi convertia a data para `Date` antes do controller, e o `endOfDay: true` era perdido. Resultado: o prazo final fechava no **início** do dia no create e no **fim** do dia no update (janela de inscrição inconsistente). | `create` → `2026-03-10T00:00:00Z`; `update` → `2026-04-30T23:59:59.999Z` |
 | 14 | **Média** | **Comparação de datas por INSTANTE em vez de DIA DE CALENDÁRIO.** No calendário do dashboard e em “Próxima atividade”, um evento de segunda (gravado como meia-noite UTC) caía no **domingo** em UTC-3, e uma atividade de **hoje** não aparecia como próxima. No detalhe do evento, as atividades eram agrupadas pelo dia local, podendo separar/juntar dias diferente do exibido. | `new Date(startDate) >= weekStart` (local) deslocava o dia |
+| 15 | **Crítica** | **QR Code exibido codificava a IMAGEM, não o token.** `QRCodeCard` usava `react-qr-code` com o **data URL PNG** devolvido pelo backend. O QR lido pela câmera continha `data:image/png;base64,...` em vez do token `AC...` → a validação falhava sempre. | `QRCodeCard value={qrCode}` (data URL) |
+| 16 | **Alta** | **Código manual não funcionava.** O endpoint de scan só aceitava o `qrToken` (que o participante não conhece). Digitar o código da inscrição (`EVT-2026-000123`) retornava 404. | `POST /attendance/scan { code }` → 404 |
 
 ---
 
@@ -45,6 +47,11 @@ Foram reproduzidos em execução real (não apenas por leitura de código):
 - **`EventDetail.jsx`** — programação agrupada por **dia de calendário** (UTC), igual ao dia exibido.
 - **`MinhaArea.jsx`** — “Próxima atividade” compara dias de calendário (inclui o **hoje**) e ordena por dia + horário.
 - **`registrationController.js`** — ano do código de inscrição usa `getUTCFullYear` (evita virada de ano em 31/12 em UTC-3).
+- **`components/Cards.jsx` (`QRCodeCard`)** — codifica o **token** no QR; se receber um data URL, renderiza como imagem (nunca realimenta o data URL no encoder).
+- **`InscricaoDetail.jsx` / `EventDetail.jsx`** — passam `registration.qrToken` para o QR (o valor que o backend valida).
+- **`attendanceService.js`** — `findRegistrationByScan()` resolve por **token (case-sensitive)** ou **código da inscrição (normalizado em maiúsculas)**; registra `method` QR_CODE/MANUAL; duplicidade devolve `details.recordedAt`.
+- **`attendanceController.js` + `validations/schemas.js`** — scan/validate aceitam `qrToken` **ou** `code` (normalização e rejeição no backend).
+- **`api/services.js`** — envio do código manual; **`AdminOperador.jsx`** — placeholder do campo manual indica o código da inscrição.
 - **`adminController.updateInstitution` / `speakerController.updateSpeaker`** — whitelist de campos.
 - **`frontend/api/client.js` + `services.js`** — expõem `API_BASE_URL`; `downloadUrl` respeita `VITE_API_URL`.
 - **`AdminEventoForm`** — `toForm` envia apenas campos editáveis (defesa extra).
@@ -147,7 +154,15 @@ Resultado: **29/29 verificações PASS** (incluindo o fuso brasileiro).
 - **Atualização** só grava colunas permitidas; campos relacionais/calculados são descartados.
 - Fuso de referência dos testes: **America/Sao_Paulo (UTC-3)**.
 
-## Arquivos alterados (21)
+## 10. QR Code e código manual (correção crítica)
+
+- **QR Code**: gerado a partir de `Registration.qrToken` (opaco, `AC` + 48 hex, persistido e determinístico). O frontend codifica o **token**; o data URL do servidor deixou de ser realimentado no encoder. O QR continua válido após reload, logout/login (o token está no banco).
+- **Código manual**: o operador pode digitar o código da inscrição (`EVT-2026-000123`). O backend normaliza (trim + maiúsculas), tenta primeiro o token e depois o código, e rejeita códigos vazios/inválidos.
+- **Validação no evento correto**: `activity.eventId !== registration.eventId` → 409 (não é possível usar código de um evento em outro).
+- **Duplicidade**: verificação + constraint única `@@unique([registrationId, activityId])`; resposta 409 com `details.recordedAt`. Concorrência testada (duas chamadas simultâneas → 1 registro).
+- **Segurança**: rotas de scan/validate exigem ADMIN/ORGANIZER (401 sem login, 403 para participante); nada sensível no QR.
+
+## Arquivos alterados (24)
 
 ```
 backend/src/controllers/eventController.js
@@ -161,10 +176,13 @@ backend/src/services/attendanceService.js
 backend/src/services/certificateService.js
 backend/src/utils/pdf.js
 backend/src/utils/date.js
+backend/src/validations/schemas.js
 frontend/src/api/client.js
 frontend/src/api/services.js
 frontend/src/utils/format.js
+frontend/src/components/Cards.jsx
 frontend/src/pages/EventDetail.jsx
+frontend/src/pages/participant/InscricaoDetail.jsx
 frontend/src/pages/participant/MinhaArea.jsx
 frontend/src/pages/admin/AdminDashboard.jsx
 frontend/src/pages/admin/AdminEventoForm.jsx

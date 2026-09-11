@@ -42,10 +42,21 @@ export async function registerAttendanceByQr({ qrToken, activityId, operatorId =
   }
   if (registration.event.status === 'CANCELLED') throw new ApiError(409, 'Evento cancelado.');
 
-  // Participant must be registered in the activity when required.
+  // Presence is the primary goal here: the participant does NOT need a prior
+  // activity enrollment just to check in. When the event optionally requires
+  // activity enrollment, we validate it; otherwise we create the (idempotent)
+  // activity enrollment at check-in so the participant shows up in the
+  // activity roster and the reports stay consistent (no orphan Attendance).
   const activityRegistered = registration.activityRegistrations.some((ar) => ar.activityId === activityId);
   if (registration.event.requireActivityRegistration && !activityRegistered) {
     throw new ApiError(409, 'Participante não está inscrito nesta atividade.');
+  }
+  if (!activityRegistered) {
+    await prisma.activityRegistration.upsert({
+      where: { registrationId_activityId: { registrationId: registration.id, activityId } },
+      create: { registrationId: registration.id, activityId, status: 'CONFIRMED' },
+      update: {},
+    });
   }
 
   // Duplicate check.
@@ -141,6 +152,14 @@ export async function setManualAttendance({ registrationId, activityId, present,
     throw new ApiError(409, 'Atividade encerrada. Presença não pode ser registrada.');
   }
   if (registration.event.status === 'CANCELLED') throw new ApiError(409, 'Evento cancelado.');
+
+  // Keep the activity roster consistent: an attendance row must never be orphaned
+  // (present in Attendance but absent from the activity's enrollments).
+  await prisma.activityRegistration.upsert({
+    where: { registrationId_activityId: { registrationId, activityId } },
+    create: { registrationId, activityId, status: 'CONFIRMED' },
+    update: {},
+  });
 
   const attendance = await prisma.attendance.upsert({
     where: { registrationId_activityId: { registrationId, activityId } },

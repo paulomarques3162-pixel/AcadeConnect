@@ -71,6 +71,30 @@ export const listActivityAttendance = asyncHandler(async (req, res) => {
     };
   });
 
+  // Legacy/edge safety: include any attendance whose participant is not in the
+  // activity enrollment list, so a recorded presence is never hidden from the
+  // roster (and can be reconciled instead of becoming an invisible orphan).
+  const enrolledIds = new Set(activityRegs.map((ar) => ar.registrationId));
+  const orphanAttendance = await prisma.attendance.findMany({
+    where: { activityId, registrationId: { notIn: [...enrolledIds] } },
+    include: {
+      user: { select: { id: true, name: true, email: true, course: true } },
+      registration: { select: { id: true, code: true } },
+    },
+  });
+  rows = rows.concat(
+    orphanAttendance.map((att) => ({
+      registrationId: att.registrationId,
+      activityId,
+      code: att.registration.code,
+      participant: att.user,
+      status: att.status,
+      method: att.method,
+      recordedAt: att.recordedAt,
+      operatorId: att.operatorId,
+    }))
+  );
+
   if (search) {
     const q = search.toLowerCase();
     rows = rows.filter(
@@ -113,10 +137,18 @@ export const eventAttendanceSummary = asyncHandler(async (req, res) => {
   });
 
   const summary = activities.map((a) => {
-    const inscritos = a.registrations.length;
     const presentes = a.attendance.filter((x) => x.status === 'PRESENT').length;
-    const ausentes = inscritos - presentes;
-    const percentual = inscritos === 0 ? 0 : Math.round((presentes / inscritos) * 100);
+    // The denominator is the union of enrolled participants and recorded
+    // attendees, so an attendance without a prior enrollment never pushes the
+    // percentage above 100%.
+    const enrolledCount = a.registrations.length;
+    const presentRegistrationIds = new Set(a.attendance.filter((x) => x.status === 'PRESENT').map((x) => x.registrationId));
+    const inscritos = new Set([
+      ...a.registrations.map((r) => r.registrationId),
+      ...presentRegistrationIds,
+    ]).size || enrolledCount;
+    const ausentes = Math.max(0, inscritos - presentes);
+    const percentual = inscritos === 0 ? 0 : Math.min(100, Math.round((presentes / inscritos) * 100));
     return {
       activityId: a.id,
       activityName: a.name,

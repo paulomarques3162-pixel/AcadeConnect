@@ -24,8 +24,10 @@ export default function AdminAtividades() {
   );
 
   const allActivities = data || [];
-  // Server list for admin is flat; filter pages are simulated client-side for simplicity.
-  const filtered = eventId ? allActivities : allActivities;
+  // The API returns the full (already event-filtered) list; paginate client-side.
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(allActivities.length / pageSize));
+  const pageItems = allActivities.slice((page - 1) * pageSize, page * pageSize);
 
   const duplicate = async (id) => {
     try { await activityApi.duplicate(id); toast.success('Atividade duplicada.'); reload(); }
@@ -89,8 +91,8 @@ export default function AdminAtividades() {
 
       {loading && <Spinner text="Carregando atividades..." />}
       {error && <ErrorState onRetry={reload} />}
-      {!loading && !error && <DataTable columns={columns} rows={filtered} loading={loading} emptyTitle="Nenhuma atividade." emptyDescription="Crie atividades para seus eventos." />}
-      <Pagination page={page} pages={Math.ceil(filtered.length / 10)} onPage={setPage} />
+      {!loading && !error && <DataTable columns={columns} rows={pageItems} loading={loading} emptyTitle="Nenhuma atividade." emptyDescription="Crie atividades para seus eventos." />}
+      <Pagination page={page} pages={totalPages} onPage={setPage} />
 
       <ConfirmDialog open={!!toDelete} title="Excluir atividade" message="Esta atividade e seus registros serão excluídos." confirmLabel="Excluir" danger loading={busy} onConfirm={remove} onClose={() => setToDelete(null)} />
       <ConfirmDialog open={!!toClose} title="Encerrar atividade" message="Deseja encerrar esta atividade? Ela passará a não aceitar novas inscrições nem registro de presença." confirmLabel="Encerrar" loading={busy} onConfirm={close} onClose={() => setToClose(null)} />

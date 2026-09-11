@@ -189,7 +189,13 @@ export const createInstitution = asyncHandler(async (req, res) => {
 
 export const updateInstitution = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const institution = await prisma.institution.update({ where: { id }, data: req.body });
+  // Whitelist writable scalar fields (never forward the raw body to Prisma).
+  const data = {};
+  for (const f of ['name', 'cnpj', 'description', 'logoUrl']) {
+    if (req.body[f] !== undefined) data[f] = req.body[f] === '' ? null : req.body[f];
+  }
+  const institution = await prisma.institution.update({ where: { id }, data });
+  await createAuditLog({ userId: req.user.id, action: 'INSTITUTION_UPDATED', resource: 'Institution', resourceId: id, ip: req.ip });
   return apiResponse(res, { message: 'Instituição atualizada.', data: { institution } });
 });
 

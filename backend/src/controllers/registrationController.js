@@ -64,6 +64,9 @@ export const registerForEvent = asyncHandler(async (req, res) => {
 
   // Validate selected activities belong to event & have capacity.
   const validActivities = event.activities.filter((a) => activityIds.includes(a.id));
+  if (event.requireActivityRegistration && validActivities.length === 0) {
+    throw new ApiError(409, 'Selecione ao menos uma atividade para se inscrever neste evento.');
+  }
   for (const a of validActivities) {
     if (!a.allowsRegistration) throw new ApiError(409, `A atividade "${a.name}" não aceita inscrição.`);
     if (a.capacity) {

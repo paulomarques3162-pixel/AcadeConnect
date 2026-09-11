@@ -1,4 +1,4 @@
-import { api, unwrap } from './client.js';
+import { api, unwrap, API_BASE_URL } from './client.js';
 
 // ---- Auth ----
 export const authApi = {
@@ -98,7 +98,7 @@ export const attendanceApi = {
 export const certificateApi = {
   mine: () => api.get('/certificates/me').then(unwrap),
   get: (id) => api.get(`/certificates/${id}`).then(unwrap),
-  downloadUrl: (id) => `/api/certificates/${id}/download`,
+  downloadUrl: (id) => `${API_BASE_URL.replace(/\/$/, '')}/certificates/${id}/download`,
   validate: (code) => api.get(`/certificates/validate/${code}`).then(unwrap),
   issue: (data) => api.post('/certificates/issue', data).then(unwrap),
   auto: (eventId) => api.post(`/certificates/auto/${eventId}`).then(unwrap),

@@ -4,6 +4,10 @@ import axios from 'axios';
 // Set VITE_API_URL to override (e.g. when frontend and backend are deployed separately).
 const baseURL = import.meta.env.VITE_API_URL || '/api';
 
+// Exposed so services can build absolute URLs (e.g. file downloads) that work
+// whether the API is proxied at /api or hosted on another origin.
+export const API_BASE_URL = baseURL;
+
 export const api = axios.create({ baseURL, withCredentials: true });
 
 // Attach JWT token from localStorage to every request.

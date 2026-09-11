@@ -31,6 +31,19 @@ function enrichEvent(e) {
   return e;
 }
 
+/** FormData sends booleans as strings ("true"/"false"); normalize both cases. */
+function toBool(value) {
+  if (typeof value === 'boolean') return value;
+  return ['true', '1', 'on', 'yes'].includes(String(value).toLowerCase());
+}
+
+/** Convert an optional numeric form field: '' / null -> null, otherwise Number. */
+function toNumberOrNull(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  return Number(value);
+}
+
 export const listEvents = asyncHandler(async (req, res) => {
   const {
     page = 1,
@@ -180,21 +193,63 @@ export const updateEvent = asyncHandler(async (req, res) => {
   const existing = await prisma.event.findUnique({ where: { id } });
   if (!existing) throw new ApiError(404, 'Evento não encontrado.');
 
-  const data = { ...body };
-  delete data.id;
-  delete data.createdAt;
-  delete data.updatedAt;
-  delete data._count;
+  // Whitelist only the writable scalar columns. The frontend edits send back
+  // the full event object returned by GET (with nested `institution`,
+  // `organizer`, `activities`, `_count`, `capacityProgress`, timestamps...).
+  // Passing those nested/relation values to Prisma's update() raises a
+  // PrismaClientValidationError and silently discards the whole save — which is
+  // exactly why event edits (dates, times, text) were not persisted before.
+  const data = {};
 
+  const textFields = ['name', 'shortDescription', 'description', 'startTime', 'location', 'address', 'modality', 'category', 'status'];
+  for (const f of textFields) {
+    if (body[f] !== undefined) data[f] = body[f] === '' ? null : body[f];
+  }
+
+  if (body.startDate !== undefined) {
+    const d = parseDate(body.startDate);
+    if (!d) throw new ApiError(422, 'Data inicial inválida.');
+    data.startDate = d;
+  }
+  if (body.endDate !== undefined) {
+    const d = parseDate(body.endDate);
+    if (!d) throw new ApiError(422, 'Data final inválida.');
+    data.endDate = d;
+  }
+  if (body.registrationStart !== undefined) {
+    data.registrationStart = body.registrationStart ? parseDate(body.registrationStart) : null;
+  }
+  if (body.registrationEnd !== undefined) {
+    data.registrationEnd = body.registrationEnd ? parseDate(body.registrationEnd, { endOfDay: true }) : null;
+  }
+
+  if (body.capacity !== undefined) data.capacity = toNumberOrNull(body.capacity);
+  if (body.minimumAttendancePercentage !== undefined) data.minimumAttendancePercentage = toNumberOrNull(body.minimumAttendancePercentage);
+  if (body.certificateHours !== undefined) data.certificateHours = toNumberOrNull(body.certificateHours);
+
+  for (const f of ['allowRegistration', 'allowCancellation', 'requireActivityRegistration', 'requireAttendance', 'automaticCertificate']) {
+    if (body[f] !== undefined) data[f] = toBool(body[f]);
+  }
+
+  if (body.institutionId !== undefined) data.institutionId = body.institutionId || null;
+  // Only an ADMIN may reassign the organizer; organizers keep ownership of their events.
+  if (body.organizerId !== undefined && req.user.role === 'ADMIN') data.organizerId = body.organizerId || null;
   if (banner) data.bannerUrl = banner;
-  if (data.startDate) data.startDate = parseDate(data.startDate);
-  if (data.endDate) data.endDate = parseDate(data.endDate);
-  if (data.registrationStart) data.registrationStart = parseDate(data.registrationStart);
-  if (data.registrationEnd) data.registrationEnd = parseDate(data.registrationEnd, { endOfDay: true });
-  if (data.capacity !== undefined) data.capacity = data.capacity ? Number(data.capacity) : null;
-  if (data.minimumAttendancePercentage !== undefined) data.minimumAttendancePercentage = Number(data.minimumAttendancePercentage);
-  if (data.certificateHours !== undefined) data.certificateHours = Number(data.certificateHours);
-  if (data.name) data.slug = slugify(data.name);
+
+  // Regenerate the slug from the (possibly new) name, keeping it unique.
+  if (data.name && data.name !== existing.name) {
+    const base = slugify(data.name) || existing.slug;
+    let candidate = base;
+    let n = 1;
+    // eslint-disable-next-line no-await-in-loop
+    while (true) {
+      const clash = await prisma.event.findUnique({ where: { slug: candidate } });
+      if (!clash || clash.id === id) break;
+      candidate = `${base}-${n}`;
+      n += 1;
+    }
+    data.slug = candidate;
+  }
 
   const event = await prisma.event.update({
     where: { id },

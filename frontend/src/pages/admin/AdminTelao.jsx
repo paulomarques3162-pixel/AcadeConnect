@@ -14,24 +14,49 @@ export default function AdminTelao() {
   const [error, setError] = useState(null);
   const [name, setName] = useState('');
   const scannerRef = useRef(null);
+  const processingRef = useRef(false);
   const camId = 'telao-reader';
 
   const events = useApi(() => eventApi.list({ limit: 100 }).then((r) => r.data.events), []);
   const activities = useApi(() => (eventId ? eventApi.get(eventId).then((r) => r.data.activities) : Promise.resolve([])), [eventId]);
 
-  useEffect(() => () => { if (scannerRef.current) { try { scannerRef.current.stop(); } catch { /* */ } } }, []);
+  useEffect(() => () => { stop(); }, []);
+
+  async function stop() {
+    const scanner = scannerRef.current;
+    scannerRef.current = null;
+    if (scanner) {
+      try { await scanner.stop(); } catch { /* */ }
+      try { scanner.clear(); } catch { /* */ }
+    }
+    setStarted(false);
+  }
 
   const start = async () => {
     if (!activityId) return;
     setResult(null); setError(null);
-    if (scannerRef.current) { try { scannerRef.current.stop(); } catch { /* */ } }
+    await stop();
     const scanner = new Html5Qrcode(camId);
     scannerRef.current = scanner;
     try {
-      await scanner.start({ facingMode: 'environment' }, { fps: 8, qrbox: { width: 280, height: 280 } }, handleScan, () => {});
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 8, qrbox: { width: 280, height: 280 } },
+        async (code) => {
+          if (processingRef.current) return;
+          processingRef.current = true;
+          try { await handleScan(code); } finally { processingRef.current = false; }
+        },
+        () => {}
+      );
       setStarted(true);
-    } catch {
-      setError('Não foi possível acessar a câmera.');
+    } catch (e) {
+      const denied = e?.name === 'NotAllowedError' || /permission|denied|not allowed/i.test(String(e?.message || ''));
+      setError(
+        denied
+          ? 'Permissão de câmera negada. Autorize o acesso no navegador e tente novamente.'
+          : 'Não foi possível acessar a câmera.'
+      );
       setStarted(false);
     }
   };
@@ -89,12 +114,15 @@ export default function AdminTelao() {
               </Select>
             </Field>
           </div>
-          <div style={{ width: 380, height: 380, background: '#000', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
-            {started ? <div id={camId} /> : <div style={{ height: 380, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>Câmera inativa</div>}
+          {/* The reader container must exist before Html5Qrcode is created and
+              must not be unmounted by a re-render, or the camera never starts. */}
+          <div style={{ position: 'relative', width: 380, height: 380, background: '#000', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
+            <div id={camId} />
+            {!started && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>Câmera inativa</div>}
           </div>
           {error && <p style={{ color: '#f87171' }}>{error}</p>}
           {!started && <Button className="btn--lg" onClick={start}>Iniciar leitura</Button>}
-          {started && <Button variant="secondary" onClick={() => { try { scannerRef.current?.stop(); } catch { /* */ } setStarted(false); }}>Parar</Button>}
+          {started && <Button variant="secondary" onClick={stop}>Parar</Button>}
         </>
       )}
     </div>

@@ -15,10 +15,13 @@ export const reports = asyncHandler(async (req, res) => {
     period.lte = to ? new Date(to) : undefined;
   }
 
+  // `status` is a REGISTRATION status (PENDING/CONFIRMED/CANCELLED). It must not
+  // be applied to Attendance.status, otherwise every filter returns 0 presences.
   const attWhere = {
     ...(eventId ? { eventId } : {}),
     ...(activityId ? { activityId } : {}),
-    ...(status ? { status } : {}),
+    // Restrict presences to registrations matching the registration-status filter.
+    ...(status ? { registration: { status } } : {}),
     ...(Object.keys(period).length ? { recordedAt: period } : {}),
   };
 
@@ -28,13 +31,23 @@ export const reports = asyncHandler(async (req, res) => {
     ...(Object.keys(period).length ? { createdAt: period } : {}),
   };
 
-  const [totalInscritos, totalPresentes, totalAusentes, totalCertificados, registrations] = await Promise.all([
+  const [totalInscritos, presentRegs, totalCertificados, registrations] = await Promise.all([
     prisma.registration.count({ where: regWhere }),
-    prisma.attendance.count({ where: { ...attWhere, status: 'PRESENT' } }),
-    prisma.attendance.count({ where: { ...attWhere, status: 'ABSENT' } }),
-    prisma.certificate.count({ where: { ...(eventId ? { eventId } : {}), ...(status ? { status } : {}) } }),
+    // Distinct participants with at least one presence in the filtered scope.
+    prisma.attendance.findMany({
+      where: { ...attWhere, status: 'PRESENT' },
+      select: { registrationId: true },
+      distinct: ['registrationId'],
+    }),
+    // Certificate.status is a different enum (PENDING/AVAILABLE/ISSUED), so the
+    // registration status filter must not be forwarded here (it caused a Prisma
+    // validation error when filtering by CONFIRMED/CANCELLED).
+    prisma.certificate.count({ where: { ...(eventId ? { eventId } : {}) } }),
     prisma.registration.findMany({ where: regWhere, include: { _count: { select: { attendance: true } }, event: { select: { name: true } } } }),
   ]);
+
+  const totalPresentes = presentRegs.length;
+  const totalAusentes = Math.max(0, totalInscritos - totalPresentes);
 
   const participantesPorAtividade = await prisma.activityRegistration.groupBy({
     by: ['activityId'],
@@ -48,7 +61,7 @@ export const reports = asyncHandler(async (req, res) => {
   const actMap = Object.fromEntries(activities.map((a) => [a.id, a.name]));
 
   const totalAtividadesParticipadas = registrations.reduce((acc, r) => acc + r._count.attendance, 0);
-  const percentualPresenca = totalInscritos === 0 ? 0 : Math.round((totalPresentes / totalInscritos) * 100);
+  const percentualPresenca = totalInscritos === 0 ? 0 : Math.min(100, Math.round((totalPresentes / totalInscritos) * 100));
 
   return apiResponse(res, {
     message: 'Relatório.',

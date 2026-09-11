@@ -28,7 +28,7 @@ export async function buildCertificatePdf(opts) {
   const done = new Promise((resolve) => doc.on('end', resolve));
 
   const dateStr = formatDate(opts.date);
-  const year = new Date(opts.date).getFullYear();
+  const year = new Date(opts.date).getUTCFullYear();
 
   // Border frame
   doc.save().lineWidth(4).strokeColor('#14532d').rect(35, 30, doc.page.width - 70, doc.page.height - 60).stroke();
@@ -136,8 +136,10 @@ export async function buildCertificatePdf(opts) {
 }
 
 function formatDate(value) {
+  // Event/activity dates are stored as UTC-midnight of the chosen calendar day.
+  // Using local getters (UTC-3) rendered the previous day on the certificate.
   const d = new Date(value);
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
 }
 
 function formatNumber(n) {

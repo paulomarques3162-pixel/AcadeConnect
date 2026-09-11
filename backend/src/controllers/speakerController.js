@@ -56,10 +56,12 @@ export const createSpeaker = asyncHandler(async (req, res) => {
 export const updateSpeaker = asyncHandler(async (req, res) => {
   const body = req.body;
   const photo = req.file?.filename || null;
-  const data = { ...body };
-  delete data.id;
-  delete data.createdAt;
-  delete data.updatedAt;
+  // Whitelist scalar fields; the frontend may send back nested relations
+  // (`activities`, `institution`) which would break Prisma's update().
+  const data = {};
+  for (const f of ['name', 'email', 'specialty', 'bio', 'institutionId']) {
+    if (body[f] !== undefined) data[f] = body[f] === '' ? null : body[f];
+  }
   if (photo) data.photoUrl = photo;
   const speaker = await prisma.speaker.update({ where: { id: req.params.id }, data, select });
   await createAuditLog({ userId: req.user.id, action: 'SPEAKER_UPDATED', resource: 'Speaker', resourceId: speaker.id, ip: req.ip });

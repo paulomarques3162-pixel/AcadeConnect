@@ -30,7 +30,10 @@ export async function computeAttendanceForRegistration(registrationId) {
     .filter((a) => a.requiresAttendance && a.generatesCertificate);
 
   const required = requiredActivities.length;
-  const present = registration.attendance.filter((at) => at.status === 'PRESENT').length;
+  const requiredIds = new Set(requiredActivities.map((a) => a.id));
+  const present = registration.attendance.filter(
+    (at) => at.status === 'PRESENT' && requiredIds.has(at.activityId)
+  ).length;
   const percentage = required === 0 ? 0 : Math.round((present / required) * 100);
   return { required, present, percentage };
 }
@@ -45,7 +48,7 @@ export async function issueEventCertificate(registrationId, opts = {}) {
     where: { id: registrationId },
     include: {
       user: true,
-      event: true,
+      event: { include: { organizer: { select: { name: true } } } },
       activityRegistrations: { include: { activity: true } },
       attendance: true,
       certificates: true,
@@ -63,11 +66,17 @@ export async function issueEventCertificate(registrationId, opts = {}) {
     const requiredActivities = registration.activityRegistrations
       .map((ar) => ar.activity)
       .filter((a) => a.requiresAttendance && a.generatesCertificate);
+    const requiredIds = new Set(requiredActivities.map((a) => a.id));
     const required = requiredActivities.length;
-    const present = registration.attendance.filter((a) => a.status === 'PRESENT').length;
+    // Only count presence on the activities that require attendance, otherwise
+    // an extra activity could inflate the percentage above 100%.
+    const present = registration.attendance.filter(
+      (a) => a.status === 'PRESENT' && requiredIds.has(a.activityId)
+    ).length;
     const percentage = required === 0 ? 0 : Math.round((present / required) * 100);
     if (required === 0 || percentage < event.minimumAttendancePercentage) {
-      throw new ApiErrorConflict(
+      throw new ApiError(
+        409,
         `Participante não atende ao critério mínimo de presença (exigido ${event.minimumAttendancePercentage}%, atingido ${percentage}%).`
       );
     }
@@ -95,7 +104,7 @@ export async function issueActivityCertificate(registrationId, activityId, opts 
   const { operatorId = null, force = false } = opts;
   const registration = await prisma.registration.findUnique({
     where: { id: registrationId },
-    include: { user: true, event: true, activityRegistrations: true, certificates: true, attendance: true },
+    include: { user: true, event: { include: { organizer: { select: { name: true } } } }, activityRegistrations: true, certificates: true, attendance: true },
   });
   if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
 
@@ -216,7 +225,9 @@ export async function autoIssueCertificatesForEvent(eventId) {
     const reqCount = ar.filter((x) => requiredIds.has(x.activityId)).length;
     if (reqCount === 0) continue;
 
-    const attendance = await prisma.attendance.findMany({ where: { registrationId: reg.id } });
+    const attendance = await prisma.attendance.findMany({
+      where: { registrationId: reg.id, activityId: { in: [...requiredIds] } },
+    });
     const present = attendance.filter((a) => a.status === 'PRESENT').length;
     const percentage = Math.round((present / reqCount) * 100);
     if (percentage >= event.minimumAttendancePercentage) {

@@ -15,15 +15,33 @@ const empty = {
   certificateHours: 8,
 };
 
+// Pick only the editable scalar fields. Spreading the whole GET payload used to
+// drag relation objects (`institution`, `organizer`, `activities`, `_count`,
+// `capacityProgress`) into the FormData, which the backend then rejected.
 function toForm(event) {
   return {
     ...empty,
-    ...event,
+    name: event.name ?? '',
+    shortDescription: event.shortDescription ?? '',
+    description: event.description ?? '',
     startDate: event.startDate ? event.startDate.slice(0, 10) : '',
     endDate: event.endDate ? event.endDate.slice(0, 10) : '',
+    startTime: event.startTime ?? empty.startTime,
+    location: event.location ?? '',
+    address: event.address ?? '',
+    modality: event.modality ?? empty.modality,
+    category: event.category ?? '',
+    capacity: event.capacity ?? '',
     registrationStart: event.registrationStart ? event.registrationStart.slice(0, 10) : '',
     registrationEnd: event.registrationEnd ? event.registrationEnd.slice(0, 10) : '',
-    capacity: event.capacity ?? '',
+    status: event.status ?? empty.status,
+    allowRegistration: event.allowRegistration ?? true,
+    allowCancellation: event.allowCancellation ?? true,
+    requireActivityRegistration: event.requireActivityRegistration ?? false,
+    requireAttendance: event.requireAttendance ?? true,
+    automaticCertificate: event.automaticCertificate ?? false,
+    minimumAttendancePercentage: event.minimumAttendancePercentage ?? 75,
+    certificateHours: event.certificateHours ?? 8,
   };
 }
 

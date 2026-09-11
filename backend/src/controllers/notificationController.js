@@ -1,4 +1,5 @@
 import { prisma } from '../config/prisma.js';
+import { ApiError } from '../utils/apiError.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
@@ -27,7 +28,14 @@ export const unreadCount = asyncHandler(async (req, res) => {
 });
 
 export const markRead = asyncHandler(async (req, res) => {
-  await prisma.notification.update({ where: { id: req.params.id }, data: { read: true } });
+  // Scope by userId: a notification belongs to the authenticated user only.
+  // Using a plain update({ where: { id } }) allowed any logged-in user to mark
+  // another user's notification as read (IDOR).
+  const result = await prisma.notification.updateMany({
+    where: { id: req.params.id, userId: req.user.id },
+    data: { read: true },
+  });
+  if (result.count === 0) throw new ApiError(404, 'Notificação não encontrada.');
   return apiResponse(res, { message: 'Notificação marcada como lida.' });
 });
 

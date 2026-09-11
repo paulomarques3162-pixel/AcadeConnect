@@ -1,0 +1,877 @@
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/RELATORIO_AUDITORIA.md /tmp/acade/academica/RELATORIO_AUDITORIA.md
+--- /tmp/orig/academica/RELATORIO_AUDITORIA.md	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/acade/academica/RELATORIO_AUDITORIA.md	2026-09-11 15:23:28.349077118 +0000
+@@ -0,0 +1,155 @@
++# Relatório de Auditoria Técnica — Mustangs Atlética / AcadeConnect
++
++Auditoria completa (frontend, backend, banco e QR Code) com **correção de bugs** e **testes de ponta a ponta** executados em ambiente real (PostgreSQL 15 + Node 22 + React/Vite).
++
++Data: 2026 · Escopo: código enviado em `AcadeConnect_auditoria_corrigido.zip`
++
++---
++
++## 1. Bugs encontrados
++
++Foram reproduzidos em execução real (não apenas por leitura de código):
++
++| # | Severidade | Bug | Evidência |
++|---|-----------|-----|-----------|
++| 1 | **Alta** | **Edição de evento não era persistida.** O frontend reenviava o objeto completo do GET (com `institution`, `organizer`, `activities`, `_count`, `capacityProgress`) e o backend repassava tudo direto ao Prisma. Resultado: `422 "Dados inválidos enviados ao banco"` e o registro antigo permanecia. | `PUT /api/events/:id` → 422; `GET` confirmava dados antigos |
++| 2 | **Alta** | **`ApiErrorConflict` não existia** no `certificateService`. Ao negar certificado por falta de presença, o backend lançava `ReferenceError` e devolvia **500** em vez de 409 com a mensagem clara. | Log `ReferenceError: ApiErrorConflict is not defined`; resposta 500 |
++| 3 | **Alta** | **Presença órfã / relatórios inconsistentes.** Escanear o QR de um participante sem inscrição na atividade criava uma `Attendance` sem `ActivityRegistration`. A lista da atividade não mostrava a pessoa e o resumo exibia **presentes > inscritos (200%)**. | Roster com 1 linha e resumo `{inscritos:1, presentes:2}` |
++| 4 | **Média** | **IDOR em notificações.** `POST /api/notifications/:id/read` marcava como lida a notificação de **qualquer** usuário, sem checar o dono. | Usuário B marcou notificação do usuário A → 200 |
++| 5 | **Alta** | **Câmera do “Modo telão” nunca abria.** O container `#telao-reader` só era renderizado depois de `setStarted(true)`, mas `new Html5Qrcode()` era chamado antes — o elemento não existia e o `start()` falhava. | Fluxo `AdminTelao` |
++| 6 | **Média** | **Câmera do operador podia morrer após iniciar.** Ao ligar a câmera, o React re-renderizava e movia/recriava o `div` do leitor, destacando o `<video>` criado pelo `html5-qrcode`. | `AdminOperador` (dois ramos de JSX com `#qr-reader`) |
++| 7 | **Média** | **Certificado com data errada (timezone).** O PDF usava `getDate()/getMonth()/getFullYear()` locais sobre datas salvas como meia-noite UTC. Em UTC-3 exibia o **dia anterior**. | PDF “realizado em 31/10” para evento em 01/11 |
++| 8 | **Média** | **Filtro de relatórios quebrava / sempre zero.** `status` (status de *inscrição*) era aplicado em `Attendance.status` e em `Certificate.status` (enums diferentes). | `?status=CONFIRMED` → 422; presenças sempre 0 com filtro |
++| 9 | **Média** | **Download de certificado quebrado em produção.** `downloadUrl` usava caminho fixo `/api/...`, ignorando `VITE_API_URL` (quando o backend está em outro domínio). | Certificados não baixavam no deploy |
++| 10 | **Baixa** | **Paginação de atividades não funcionava** (lista completa exibida, paginação decorativa). | `AdminAtividades` |
++| 11 | **Baixa** | **Registro em evento que exige atividade aceitava inscrição sem nenhuma atividade.** | `POST /registrations/:eventId` com `activityIds: []` |
++| 12 | **Baixa** | **`updateInstitution` / `updateSpeaker` repassavam `req.body` inteiro ao Prisma** (mesma classe do bug #1: erro de validação e save descartado). | Leitura + teste de padrão |
++| 13 | **Média** | **`registrationEnd` gravado à meia-noite no create.** O Joi convertia a data para `Date` antes do controller, e o `endOfDay: true` era perdido. Resultado: o prazo final fechava no **início** do dia no create e no **fim** do dia no update (janela de inscrição inconsistente). | `create` → `2026-03-10T00:00:00Z`; `update` → `2026-04-30T23:59:59.999Z` |
++
++---
++
++## 2. Bugs corrigidos (o que mudou)
++
++- **`eventController.updateEvent`** — agora monta um *whitelist* apenas de colunas escalares graváveis, converte booleanos/strings do `FormData`, valida datas, ignora relações e regenera o `slug` único. Edição persiste de verdade.
++- **`certificateService`** — troca `ApiErrorConflict` por `ApiError(409, ...)`; inclui `organizer` na consulta (responsável no PDF) e **conta presença apenas nas atividades que exigem presença**, evitando percentuais > 100%.
++- **`attendanceService`** — ao registrar presença de quem não estava inscrito na atividade, cria a inscrição na atividade de forma idempotente (roster/relatórios consistentes, sem órfãos). Continua **sem exigir inscrição prévia**.
++- **`attendanceController`** — a lista da atividade agora também inclui presenças legadas sem inscrição; o resumo usa a união (inscritos ∪ presentes) e limita o percentual a 100%.
++- **`notificationController.markRead`** — `updateMany` com `{ id, userId }`; retorna 404 se a notificação não for do usuário.
++- **`registrationController.registerForEvent`** — exige ao menos uma atividade quando o evento marca `requireActivityRegistration`.
++- **`reportController`** — não mistura mais status de inscrição com status de presença/certificado; presentes = participantes distintos com presença; ausentes = inscritos − presentes; percentual limitado a 100%.
++- **`pdf.js`** — datas do certificado em **UTC** (dia correto).
++- **`utils/date.js`** — `parseDate` agora preserva o `endOfDay` também quando o valor já chega como `Date` (caso do Joi no create), deixando create e update consistentes.
++- **`adminController.updateInstitution` / `speakerController.updateSpeaker`** — whitelist de campos.
++- **`frontend/api/client.js` + `services.js`** — expõem `API_BASE_URL`; `downloadUrl` respeita `VITE_API_URL`.
++- **`AdminEventoForm`** — `toForm` envia apenas campos editáveis (defesa extra).
++- **`AdminAtividades`** — paginação real (client-side).
++- **`AdminOperador` / `AdminTelao`** — container da câmera **sempre montado** e fora do fluxo de re-render; *stop/clear* aguardados; trava contra leitura duplicada; mensagens claras para **permissão negada** vs. câmera indisponível.
++
++---
++
++## 3. QR Code — situação, problema e correção
++
++**Como estava:** o QR contém um token opaco de alta entropia (`AC<48 hex>`) gerado na inscrição (`Registration.qrToken`, único). O operador (ADMIN/ORGANIZER) escaneia e o backend valida tudo.
++
++**Problemas encontrados no fluxo:** além dos bugs #3 (órfão), #5 e #6 (câmera), havia risco de inconsistência de relatórios.
++
++**O que foi corrigido, etapa por etapa:**
++
++1. **Geração** — mantida a arquitetura existente (`qrcode` no backend + `react-qr-code` no frontend). Nenhum dado sensível no QR.
++2. **Exibição** — mantida a tela/modal “Meu QR Code” (`InscricaoDetail`, `EventDetail`). Botões e layout preservados.
++3. **Leitura pela câmera** — `AdminOperador` e `AdminTelao` corrigidos: o `div` do leitor existe antes de criar o `Html5Qrcode` e **não é desmontado** por re-render. Fim de câmera: `stop()` + `clear()`. Erro de permissão tratado com mensagem específica.
++4. **Detecção/envio** — leitura automática (fps 8–10) com trava para impedir submissões simultâneas; além do campo manual de token.
++5. **Validação (100% backend)** — `POST /api/attendance/scan`: token existe? inscrição confirmada? atividade existe e é do **mesmo evento**? atividade/evento não cancelados/encerrados? duplicidade? Tudo no servidor.
++6. **Registro da presença** — gravada em `Attendance` com `recordedAt`, `method = QR_CODE`, `operatorId`; agora **com a inscrição na atividade garantida** (sem órfãos).
++7. **Confirmação** — “Presença registrada com sucesso!” com nome, código da inscrição e atividade; “Presença já registrada” na duplicidade; “QR Code inválido” no token desconhecido.
++
++**Dependência de inscrição prévia em atividade:** removida do caminho de presença. Com `requireActivityRegistration = false` (padrão), qualquer inscrito no evento registra presença mesmo sem ter escolhido a atividade. Se o organizador **optar** por exigir atividade, aí sim é validado (regra de negócio explícita).
++
++**Duplicidade:** bloqueada no backend e no banco (constraint única `@@unique([registrationId, activityId])` + verificação prévia).
++
++---
++
++## 4. Banco de dados
++
++- **Persistência:** bug real de update de evento corrigido (o save era descartado por erro de validação do Prisma). Teste `criar → salvar → recarregar → editar → salvar → recarregar` passou (nome, datas e horário mantidos).
++- **Datas/horários/timezone:** datas “somente dia” gravadas ao meio-dia UTC (dia escolhido preservado). Corrigido o único ponto que ainda usava fuso local: **data impressa no certificado**.
++- **Relacionamentos:** `Attendance` deixou de gerar registros órfãos; resumos agora usam união inscritos/presentes.
++- **Sem alteração de schema.** Nenhuma tabela nova, nenhuma migração destrutiva, dados existentes preservados. As correções são compatíveis com o banco atual.
++
++---
++
++## 5. Segurança
++
++- **IDOR em notificações** corrigido (escopo por `userId`).
++- **Validação sempre no backend** (o frontend não decide sucesso).
++- **RBAC** mantido (scan/validação/registro apenas ADMIN/ORGANIZER).
++- **Auto-cadastro nunca cria ADMIN/ORGANIZER** (verificado no código).
++- **Sem SQL injection** (Prisma parametrizado), **Helmet**, **CORS restrito**, **rate limit** e **bcrypt** já presentes e preservados.
++
++> Observação de segurança (não bloqueante): os PDFs de certificado ficam em `backend/uploads`, servido estaticamente. O acesso exige conhecer o código aleatório (mesmo nível de exposição da página pública de validação). Para produção de alto sigilo, mover para storage privado com URL assinada.
++
++---
++
++## 6. Testes realizados (ambiente real)
++
++Subi PostgreSQL 15 + API + build do frontend e rodei scripts de ponta a ponta:
++
++- Login admin; criação de evento e de atividade.
++- **Editar evento via payload completo do frontend → 200 e persistido** (antes 422).
++- Inscrição de participante com e **sem** atividade.
++- **Scan QR (inscrito) → 201**; scan repetido → **409 “Presença já registrada”**; token inválido → **404**.
++- **Scan de quem não estava na atividade → 201**, roster com as 2 pessoas, resumo `{inscritos:2, presentes:2}` (antes 1/2 e 200%).
++- **Certificado sem presença → 409** com mensagem clara (antes 500); com `force` → 201; download do PDF → 200.
++- **PDF com data correta** (`01/11/2026`, antes `31/10/2026`).
++- **IDOR de notificação → 404** (antes 200).
++- Filtros de relatório `CONFIRMED`/`CANCELLED` → válidos e coerentes.
++- `npm run build` do frontend → **sucesso** (sem erros de import/compilação).
++- `node --check` em todos os arquivos do backend → **sem erros de sintaxe**.
++
++---
++
++## 7. Problemas restantes (dependem de configuração externa)
++
++1. **Deploy atual sem backend conectado.** Em `https://acade-connect.vercel.app`, `GET /api/health` retorna **404 NOT_FOUND** — o frontend chama `/api` na própria Vercel. É preciso definir, no build da Vercel, `VITE_API_URL=https://SEU-BACKEND/api` e liberar a origem no `CORS_ORIGINS` do backend. Sem isso, nenhuma tela carrega dados em produção.
++2. **HTTPS obrigatório para a câmera.** `getUserMedia` só funciona em `https` (ou `localhost`). O deploy é HTTPS, então ao apontar para o backend correto a câmera funciona; em rede local use `https` ou `localhost`.
++3. **E-mail desativado** (`EMAIL_ENABLED=false`): recuperação de senha/inscrição só aparecem no console. Configure SMTP no `.env`.
++4. **Uploads em disco local**: em ambientes efêmeros (Render/Railway), banners/PDFs somem no redeploy. Migrar para S3/Cloudinary (`UPLOAD_DIR`/`UPLOADS_BASE_URL` já preparados).
++5. **QR sem expiração**: o schema não tem campo de expiração. Se for requisito, é uma evolução (nova coluna + verificação), sem impacto nos dados atuais.
++
++---
++
++## 8. Verificação de datas (CRUD) — teste dedicado
++
++Teste automatizado cobrindo criar → salvar → recarregar → editar → salvar → recarregar e exclusão, executado com o **servidor em `America/Sao_Paulo` (UTC-3)**:
++
++- `event.startDate` / `endDate`: o dia escolhido é gravado e retornado **exatamente** (ex.: `2026-03-15T00:00:00.000Z`), sem "voltar um dia".
++- `startTime`: preservado após criar, editar e recarregar (`19:30` → `20:15`).
++- `registrationStart`: início do dia; **`registrationEnd`: fim do dia** (`23:59:59.999Z`) tanto no create quanto no update.
++- `activity.date` + `startTime`/`endTime`: criados, editados e persistidos corretamente.
++- **Exclusões:** atividade excluída some (404); evento **desativado** some da listagem/GET e bloqueia nova inscrição (409); evento **excluído permanentemente** some (404).
++- **Exibição (frontend) em UTC-3:** `15/03/2026` para a data do evento; `createdAt` real aparece em horário local (`12:23` para `15:23Z`).
++- **PDF do certificado:** data impressa correta (`01/11/2026`, sem o antigo erro `31/10/2026`).
++
++Resultado: **29/29 verificações PASS** (incluindo o fuso brasileiro).
++
++## Arquivos alterados (17)
++
++```
++backend/src/controllers/eventController.js
++backend/src/controllers/attendanceController.js
++backend/src/controllers/notificationController.js
++backend/src/controllers/registrationController.js
++backend/src/controllers/reportController.js
++backend/src/controllers/adminController.js
++backend/src/controllers/speakerController.js
++backend/src/services/attendanceService.js
++backend/src/services/certificateService.js
++backend/src/utils/pdf.js
++backend/src/utils/date.js
++frontend/src/api/client.js
++frontend/src/api/services.js
++frontend/src/pages/admin/AdminEventoForm.jsx
++frontend/src/pages/admin/AdminAtividades.jsx
++frontend/src/pages/admin/AdminOperador.jsx
++frontend/src/pages/admin/AdminTelao.jsx
++```
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/adminController.js /tmp/acade/academica/backend/src/controllers/adminController.js
+--- /tmp/orig/academica/backend/src/controllers/adminController.js	2026-09-09 23:46:28.000000000 +0000
++++ /tmp/acade/academica/backend/src/controllers/adminController.js	2026-09-11 15:11:12.967353413 +0000
+@@ -189,7 +189,13 @@
+ 
+ export const updateInstitution = asyncHandler(async (req, res) => {
+   const { id } = req.params;
+-  const institution = await prisma.institution.update({ where: { id }, data: req.body });
++  // Whitelist writable scalar fields (never forward the raw body to Prisma).
++  const data = {};
++  for (const f of ['name', 'cnpj', 'description', 'logoUrl']) {
++    if (req.body[f] !== undefined) data[f] = req.body[f] === '' ? null : req.body[f];
++  }
++  const institution = await prisma.institution.update({ where: { id }, data });
++  await createAuditLog({ userId: req.user.id, action: 'INSTITUTION_UPDATED', resource: 'Institution', resourceId: id, ip: req.ip });
+   return apiResponse(res, { message: 'Instituição atualizada.', data: { institution } });
+ });
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/attendanceController.js /tmp/acade/academica/backend/src/controllers/attendanceController.js
+--- /tmp/orig/academica/backend/src/controllers/attendanceController.js	2026-09-09 14:20:48.000000000 +0000
++++ /tmp/acade/academica/backend/src/controllers/attendanceController.js	2026-09-11 15:10:53.095198739 +0000
+@@ -71,6 +71,30 @@
+     };
+   });
+ 
++  // Legacy/edge safety: include any attendance whose participant is not in the
++  // activity enrollment list, so a recorded presence is never hidden from the
++  // roster (and can be reconciled instead of becoming an invisible orphan).
++  const enrolledIds = new Set(activityRegs.map((ar) => ar.registrationId));
++  const orphanAttendance = await prisma.attendance.findMany({
++    where: { activityId, registrationId: { notIn: [...enrolledIds] } },
++    include: {
++      user: { select: { id: true, name: true, email: true, course: true } },
++      registration: { select: { id: true, code: true } },
++    },
++  });
++  rows = rows.concat(
++    orphanAttendance.map((att) => ({
++      registrationId: att.registrationId,
++      activityId,
++      code: att.registration.code,
++      participant: att.user,
++      status: att.status,
++      method: att.method,
++      recordedAt: att.recordedAt,
++      operatorId: att.operatorId,
++    }))
++  );
++
+   if (search) {
+     const q = search.toLowerCase();
+     rows = rows.filter(
+@@ -113,10 +137,18 @@
+   });
+ 
+   const summary = activities.map((a) => {
+-    const inscritos = a.registrations.length;
+     const presentes = a.attendance.filter((x) => x.status === 'PRESENT').length;
+-    const ausentes = inscritos - presentes;
+-    const percentual = inscritos === 0 ? 0 : Math.round((presentes / inscritos) * 100);
++    // The denominator is the union of enrolled participants and recorded
++    // attendees, so an attendance without a prior enrollment never pushes the
++    // percentage above 100%.
++    const enrolledCount = a.registrations.length;
++    const presentRegistrationIds = new Set(a.attendance.filter((x) => x.status === 'PRESENT').map((x) => x.registrationId));
++    const inscritos = new Set([
++      ...a.registrations.map((r) => r.registrationId),
++      ...presentRegistrationIds,
++    ]).size || enrolledCount;
++    const ausentes = Math.max(0, inscritos - presentes);
++    const percentual = inscritos === 0 ? 0 : Math.min(100, Math.round((presentes / inscritos) * 100));
+     return {
+       activityId: a.id,
+       activityName: a.name,
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/eventController.js /tmp/acade/academica/backend/src/controllers/eventController.js
+--- /tmp/orig/academica/backend/src/controllers/eventController.js	2026-09-11 14:18:30.000000000 +0000
++++ /tmp/acade/academica/backend/src/controllers/eventController.js	2026-09-11 15:09:54.498742661 +0000
+@@ -31,6 +31,19 @@
+   return e;
+ }
+ 
++/** FormData sends booleans as strings ("true"/"false"); normalize both cases. */
++function toBool(value) {
++  if (typeof value === 'boolean') return value;
++  return ['true', '1', 'on', 'yes'].includes(String(value).toLowerCase());
++}
++
++/** Convert an optional numeric form field: '' / null -> null, otherwise Number. */
++function toNumberOrNull(value) {
++  if (value === undefined) return undefined;
++  if (value === null || value === '') return null;
++  return Number(value);
++}
++
+ export const listEvents = asyncHandler(async (req, res) => {
+   const {
+     page = 1,
+@@ -180,21 +193,63 @@
+   const existing = await prisma.event.findUnique({ where: { id } });
+   if (!existing) throw new ApiError(404, 'Evento não encontrado.');
+ 
+-  const data = { ...body };
+-  delete data.id;
+-  delete data.createdAt;
+-  delete data.updatedAt;
+-  delete data._count;
++  // Whitelist only the writable scalar columns. The frontend edits send back
++  // the full event object returned by GET (with nested `institution`,
++  // `organizer`, `activities`, `_count`, `capacityProgress`, timestamps...).
++  // Passing those nested/relation values to Prisma's update() raises a
++  // PrismaClientValidationError and silently discards the whole save — which is
++  // exactly why event edits (dates, times, text) were not persisted before.
++  const data = {};
++
++  const textFields = ['name', 'shortDescription', 'description', 'startTime', 'location', 'address', 'modality', 'category', 'status'];
++  for (const f of textFields) {
++    if (body[f] !== undefined) data[f] = body[f] === '' ? null : body[f];
++  }
+ 
++  if (body.startDate !== undefined) {
++    const d = parseDate(body.startDate);
++    if (!d) throw new ApiError(422, 'Data inicial inválida.');
++    data.startDate = d;
++  }
++  if (body.endDate !== undefined) {
++    const d = parseDate(body.endDate);
++    if (!d) throw new ApiError(422, 'Data final inválida.');
++    data.endDate = d;
++  }
++  if (body.registrationStart !== undefined) {
++    data.registrationStart = body.registrationStart ? parseDate(body.registrationStart) : null;
++  }
++  if (body.registrationEnd !== undefined) {
++    data.registrationEnd = body.registrationEnd ? parseDate(body.registrationEnd, { endOfDay: true }) : null;
++  }
++
++  if (body.capacity !== undefined) data.capacity = toNumberOrNull(body.capacity);
++  if (body.minimumAttendancePercentage !== undefined) data.minimumAttendancePercentage = toNumberOrNull(body.minimumAttendancePercentage);
++  if (body.certificateHours !== undefined) data.certificateHours = toNumberOrNull(body.certificateHours);
++
++  for (const f of ['allowRegistration', 'allowCancellation', 'requireActivityRegistration', 'requireAttendance', 'automaticCertificate']) {
++    if (body[f] !== undefined) data[f] = toBool(body[f]);
++  }
++
++  if (body.institutionId !== undefined) data.institutionId = body.institutionId || null;
++  // Only an ADMIN may reassign the organizer; organizers keep ownership of their events.
++  if (body.organizerId !== undefined && req.user.role === 'ADMIN') data.organizerId = body.organizerId || null;
+   if (banner) data.bannerUrl = banner;
+-  if (data.startDate) data.startDate = parseDate(data.startDate);
+-  if (data.endDate) data.endDate = parseDate(data.endDate);
+-  if (data.registrationStart) data.registrationStart = parseDate(data.registrationStart);
+-  if (data.registrationEnd) data.registrationEnd = parseDate(data.registrationEnd, { endOfDay: true });
+-  if (data.capacity !== undefined) data.capacity = data.capacity ? Number(data.capacity) : null;
+-  if (data.minimumAttendancePercentage !== undefined) data.minimumAttendancePercentage = Number(data.minimumAttendancePercentage);
+-  if (data.certificateHours !== undefined) data.certificateHours = Number(data.certificateHours);
+-  if (data.name) data.slug = slugify(data.name);
++
++  // Regenerate the slug from the (possibly new) name, keeping it unique.
++  if (data.name && data.name !== existing.name) {
++    const base = slugify(data.name) || existing.slug;
++    let candidate = base;
++    let n = 1;
++    // eslint-disable-next-line no-await-in-loop
++    while (true) {
++      const clash = await prisma.event.findUnique({ where: { slug: candidate } });
++      if (!clash || clash.id === id) break;
++      candidate = `${base}-${n}`;
++      n += 1;
++    }
++    data.slug = candidate;
++  }
+ 
+   const event = await prisma.event.update({
+     where: { id },
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/notificationController.js /tmp/acade/academica/backend/src/controllers/notificationController.js
+--- /tmp/orig/academica/backend/src/controllers/notificationController.js	2026-09-09 14:21:06.000000000 +0000
++++ /tmp/acade/academica/backend/src/controllers/notificationController.js	2026-09-11 15:11:04.487287409 +0000
+@@ -1,4 +1,5 @@
+ import { prisma } from '../config/prisma.js';
++import { ApiError } from '../utils/apiError.js';
+ import { apiResponse } from '../utils/apiResponse.js';
+ import { asyncHandler } from '../utils/asyncHandler.js';
+ 
+@@ -27,7 +28,14 @@
+ });
+ 
+ export const markRead = asyncHandler(async (req, res) => {
+-  await prisma.notification.update({ where: { id: req.params.id }, data: { read: true } });
++  // Scope by userId: a notification belongs to the authenticated user only.
++  // Using a plain update({ where: { id } }) allowed any logged-in user to mark
++  // another user's notification as read (IDOR).
++  const result = await prisma.notification.updateMany({
++    where: { id: req.params.id, userId: req.user.id },
++    data: { read: true },
++  });
++  if (result.count === 0) throw new ApiError(404, 'Notificação não encontrada.');
+   return apiResponse(res, { message: 'Notificação marcada como lida.' });
+ });
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/registrationController.js /tmp/acade/academica/backend/src/controllers/registrationController.js
+--- /tmp/orig/academica/backend/src/controllers/registrationController.js	2026-09-11 12:07:30.000000000 +0000
++++ /tmp/acade/academica/backend/src/controllers/registrationController.js	2026-09-11 15:11:28.135471472 +0000
+@@ -64,6 +64,9 @@
+ 
+   // Validate selected activities belong to event & have capacity.
+   const validActivities = event.activities.filter((a) => activityIds.includes(a.id));
++  if (event.requireActivityRegistration && validActivities.length === 0) {
++    throw new ApiError(409, 'Selecione ao menos uma atividade para se inscrever neste evento.');
++  }
+   for (const a of validActivities) {
+     if (!a.allowsRegistration) throw new ApiError(409, `A atividade "${a.name}" não aceita inscrição.`);
+     if (a.capacity) {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/reportController.js /tmp/acade/academica/backend/src/controllers/reportController.js
+--- /tmp/orig/academica/backend/src/controllers/reportController.js	2026-09-09 14:21:48.000000000 +0000
++++ /tmp/acade/academica/backend/src/controllers/reportController.js	2026-09-11 15:17:08.054117161 +0000
+@@ -15,10 +15,13 @@
+     period.lte = to ? new Date(to) : undefined;
+   }
+ 
++  // `status` is a REGISTRATION status (PENDING/CONFIRMED/CANCELLED). It must not
++  // be applied to Attendance.status, otherwise every filter returns 0 presences.
+   const attWhere = {
+     ...(eventId ? { eventId } : {}),
+     ...(activityId ? { activityId } : {}),
+-    ...(status ? { status } : {}),
++    // Restrict presences to registrations matching the registration-status filter.
++    ...(status ? { registration: { status } } : {}),
+     ...(Object.keys(period).length ? { recordedAt: period } : {}),
+   };
+ 
+@@ -28,14 +31,24 @@
+     ...(Object.keys(period).length ? { createdAt: period } : {}),
+   };
+ 
+-  const [totalInscritos, totalPresentes, totalAusentes, totalCertificados, registrations] = await Promise.all([
++  const [totalInscritos, presentRegs, totalCertificados, registrations] = await Promise.all([
+     prisma.registration.count({ where: regWhere }),
+-    prisma.attendance.count({ where: { ...attWhere, status: 'PRESENT' } }),
+-    prisma.attendance.count({ where: { ...attWhere, status: 'ABSENT' } }),
+-    prisma.certificate.count({ where: { ...(eventId ? { eventId } : {}), ...(status ? { status } : {}) } }),
++    // Distinct participants with at least one presence in the filtered scope.
++    prisma.attendance.findMany({
++      where: { ...attWhere, status: 'PRESENT' },
++      select: { registrationId: true },
++      distinct: ['registrationId'],
++    }),
++    // Certificate.status is a different enum (PENDING/AVAILABLE/ISSUED), so the
++    // registration status filter must not be forwarded here (it caused a Prisma
++    // validation error when filtering by CONFIRMED/CANCELLED).
++    prisma.certificate.count({ where: { ...(eventId ? { eventId } : {}) } }),
+     prisma.registration.findMany({ where: regWhere, include: { _count: { select: { attendance: true } }, event: { select: { name: true } } } }),
+   ]);
+ 
++  const totalPresentes = presentRegs.length;
++  const totalAusentes = Math.max(0, totalInscritos - totalPresentes);
++
+   const participantesPorAtividade = await prisma.activityRegistration.groupBy({
+     by: ['activityId'],
+     where: activityId ? { activityId } : undefined,
+@@ -48,7 +61,7 @@
+   const actMap = Object.fromEntries(activities.map((a) => [a.id, a.name]));
+ 
+   const totalAtividadesParticipadas = registrations.reduce((acc, r) => acc + r._count.attendance, 0);
+-  const percentualPresenca = totalInscritos === 0 ? 0 : Math.round((totalPresentes / totalInscritos) * 100);
++  const percentualPresenca = totalInscritos === 0 ? 0 : Math.min(100, Math.round((totalPresentes / totalInscritos) * 100));
+ 
+   return apiResponse(res, {
+     message: 'Relatório.',
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/speakerController.js /tmp/acade/academica/backend/src/controllers/speakerController.js
+--- /tmp/orig/academica/backend/src/controllers/speakerController.js	2026-09-09 14:20:18.000000000 +0000
++++ /tmp/acade/academica/backend/src/controllers/speakerController.js	2026-09-11 15:11:12.967353413 +0000
+@@ -56,10 +56,12 @@
+ export const updateSpeaker = asyncHandler(async (req, res) => {
+   const body = req.body;
+   const photo = req.file?.filename || null;
+-  const data = { ...body };
+-  delete data.id;
+-  delete data.createdAt;
+-  delete data.updatedAt;
++  // Whitelist scalar fields; the frontend may send back nested relations
++  // (`activities`, `institution`) which would break Prisma's update().
++  const data = {};
++  for (const f of ['name', 'email', 'specialty', 'bio', 'institutionId']) {
++    if (body[f] !== undefined) data[f] = body[f] === '' ? null : body[f];
++  }
+   if (photo) data.photoUrl = photo;
+   const speaker = await prisma.speaker.update({ where: { id: req.params.id }, data, select });
+   await createAuditLog({ userId: req.user.id, action: 'SPEAKER_UPDATED', resource: 'Speaker', resourceId: speaker.id, ip: req.ip });
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/services/attendanceService.js /tmp/acade/academica/backend/src/services/attendanceService.js
+--- /tmp/orig/academica/backend/src/services/attendanceService.js	2026-09-10 18:17:40.000000000 +0000
++++ /tmp/acade/academica/backend/src/services/attendanceService.js	2026-09-11 15:10:37.563077853 +0000
+@@ -42,11 +42,22 @@
+   }
+   if (registration.event.status === 'CANCELLED') throw new ApiError(409, 'Evento cancelado.');
+ 
+-  // Participant must be registered in the activity when required.
++  // Presence is the primary goal here: the participant does NOT need a prior
++  // activity enrollment just to check in. When the event optionally requires
++  // activity enrollment, we validate it; otherwise we create the (idempotent)
++  // activity enrollment at check-in so the participant shows up in the
++  // activity roster and the reports stay consistent (no orphan Attendance).
+   const activityRegistered = registration.activityRegistrations.some((ar) => ar.activityId === activityId);
+   if (registration.event.requireActivityRegistration && !activityRegistered) {
+     throw new ApiError(409, 'Participante não está inscrito nesta atividade.');
+   }
++  if (!activityRegistered) {
++    await prisma.activityRegistration.upsert({
++      where: { registrationId_activityId: { registrationId: registration.id, activityId } },
++      create: { registrationId: registration.id, activityId, status: 'CONFIRMED' },
++      update: {},
++    });
++  }
+ 
+   // Duplicate check.
+   const existing = await prisma.attendance.findUnique({
+@@ -142,6 +153,14 @@
+   }
+   if (registration.event.status === 'CANCELLED') throw new ApiError(409, 'Evento cancelado.');
+ 
++  // Keep the activity roster consistent: an attendance row must never be orphaned
++  // (present in Attendance but absent from the activity's enrollments).
++  await prisma.activityRegistration.upsert({
++    where: { registrationId_activityId: { registrationId, activityId } },
++    create: { registrationId, activityId, status: 'CONFIRMED' },
++    update: {},
++  });
++
+   const attendance = await prisma.attendance.upsert({
+     where: { registrationId_activityId: { registrationId, activityId } },
+     create: {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/services/certificateService.js /tmp/acade/academica/backend/src/services/certificateService.js
+--- /tmp/orig/academica/backend/src/services/certificateService.js	2026-09-09 14:18:48.000000000 +0000
++++ /tmp/acade/academica/backend/src/services/certificateService.js	2026-09-11 15:10:29.315013654 +0000
+@@ -30,7 +30,10 @@
+     .filter((a) => a.requiresAttendance && a.generatesCertificate);
+ 
+   const required = requiredActivities.length;
+-  const present = registration.attendance.filter((at) => at.status === 'PRESENT').length;
++  const requiredIds = new Set(requiredActivities.map((a) => a.id));
++  const present = registration.attendance.filter(
++    (at) => at.status === 'PRESENT' && requiredIds.has(at.activityId)
++  ).length;
+   const percentage = required === 0 ? 0 : Math.round((present / required) * 100);
+   return { required, present, percentage };
+ }
+@@ -45,7 +48,7 @@
+     where: { id: registrationId },
+     include: {
+       user: true,
+-      event: true,
++      event: { include: { organizer: { select: { name: true } } } },
+       activityRegistrations: { include: { activity: true } },
+       attendance: true,
+       certificates: true,
+@@ -63,11 +66,17 @@
+     const requiredActivities = registration.activityRegistrations
+       .map((ar) => ar.activity)
+       .filter((a) => a.requiresAttendance && a.generatesCertificate);
++    const requiredIds = new Set(requiredActivities.map((a) => a.id));
+     const required = requiredActivities.length;
+-    const present = registration.attendance.filter((a) => a.status === 'PRESENT').length;
++    // Only count presence on the activities that require attendance, otherwise
++    // an extra activity could inflate the percentage above 100%.
++    const present = registration.attendance.filter(
++      (a) => a.status === 'PRESENT' && requiredIds.has(a.activityId)
++    ).length;
+     const percentage = required === 0 ? 0 : Math.round((present / required) * 100);
+     if (required === 0 || percentage < event.minimumAttendancePercentage) {
+-      throw new ApiErrorConflict(
++      throw new ApiError(
++        409,
+         `Participante não atende ao critério mínimo de presença (exigido ${event.minimumAttendancePercentage}%, atingido ${percentage}%).`
+       );
+     }
+@@ -95,7 +104,7 @@
+   const { operatorId = null, force = false } = opts;
+   const registration = await prisma.registration.findUnique({
+     where: { id: registrationId },
+-    include: { user: true, event: true, activityRegistrations: true, certificates: true, attendance: true },
++    include: { user: true, event: { include: { organizer: { select: { name: true } } } }, activityRegistrations: true, certificates: true, attendance: true },
+   });
+   if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
+ 
+@@ -216,7 +225,9 @@
+     const reqCount = ar.filter((x) => requiredIds.has(x.activityId)).length;
+     if (reqCount === 0) continue;
+ 
+-    const attendance = await prisma.attendance.findMany({ where: { registrationId: reg.id } });
++    const attendance = await prisma.attendance.findMany({
++      where: { registrationId: reg.id, activityId: { in: [...requiredIds] } },
++    });
+     const present = attendance.filter((a) => a.status === 'PRESENT').length;
+     const percentage = Math.round((present / reqCount) * 100);
+     if (percentage >= event.minimumAttendancePercentage) {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/utils/date.js /tmp/acade/academica/backend/src/utils/date.js
+--- /tmp/orig/academica/backend/src/utils/date.js	2026-09-11 14:18:30.000000000 +0000
++++ /tmp/acade/academica/backend/src/utils/date.js	2026-09-11 15:22:44.244733831 +0000
+@@ -9,7 +9,19 @@
+  */
+ export function parseDate(value, { endOfDay = false } = {}) {
+   if (value === undefined || value === null || value === '') return null;
+-  if (value instanceof Date) return value;
++  if (value instanceof Date) {
++    // Joi (validate) already converted date-only strings to a Date at
++    // 00:00:00.000Z before the controller runs. Preserve the endOfDay intent
++    // here too, otherwise create stored registrationEnd at the START of the
++    // deadline day while update stored it at the END (inconsistent window).
++    if (!endOfDay) return value;
++    return new Date(Date.UTC(
++      value.getUTCFullYear(),
++      value.getUTCMonth(),
++      value.getUTCDate(),
++      23, 59, 59, 999
++    ));
++  }
+   const s = String(value).trim();
+   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+     return new Date(`${s}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`);
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/utils/pdf.js /tmp/acade/academica/backend/src/utils/pdf.js
+--- /tmp/orig/academica/backend/src/utils/pdf.js	2026-09-09 23:30:46.000000000 +0000
++++ /tmp/acade/academica/backend/src/utils/pdf.js	2026-09-11 15:11:16.499380905 +0000
+@@ -28,7 +28,7 @@
+   const done = new Promise((resolve) => doc.on('end', resolve));
+ 
+   const dateStr = formatDate(opts.date);
+-  const year = new Date(opts.date).getFullYear();
++  const year = new Date(opts.date).getUTCFullYear();
+ 
+   // Border frame
+   doc.save().lineWidth(4).strokeColor('#14532d').rect(35, 30, doc.page.width - 70, doc.page.height - 60).stroke();
+@@ -136,8 +136,10 @@
+ }
+ 
+ function formatDate(value) {
++  // Event/activity dates are stored as UTC-midnight of the chosen calendar day.
++  // Using local getters (UTC-3) rendered the previous day on the certificate.
+   const d = new Date(value);
+-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
++  return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
+ }
+ 
+ function formatNumber(n) {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/api/client.js /tmp/acade/academica/frontend/src/api/client.js
+--- /tmp/orig/academica/frontend/src/api/client.js	2026-09-11 14:18:59.000000000 +0000
++++ /tmp/acade/academica/frontend/src/api/client.js	2026-09-11 15:11:28.135471472 +0000
+@@ -4,6 +4,10 @@
+ // Set VITE_API_URL to override (e.g. when frontend and backend are deployed separately).
+ const baseURL = import.meta.env.VITE_API_URL || '/api';
+ 
++// Exposed so services can build absolute URLs (e.g. file downloads) that work
++// whether the API is proxied at /api or hosted on another origin.
++export const API_BASE_URL = baseURL;
++
+ export const api = axios.create({ baseURL, withCredentials: true });
+ 
+ // Attach JWT token from localStorage to every request.
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/api/services.js /tmp/acade/academica/frontend/src/api/services.js
+--- /tmp/orig/academica/frontend/src/api/services.js	2026-09-10 23:15:36.000000000 +0000
++++ /tmp/acade/academica/frontend/src/api/services.js	2026-09-11 15:11:28.135471472 +0000
+@@ -1,4 +1,4 @@
+-import { api, unwrap } from './client.js';
++import { api, unwrap, API_BASE_URL } from './client.js';
+ 
+ // ---- Auth ----
+ export const authApi = {
+@@ -98,7 +98,7 @@
+ export const certificateApi = {
+   mine: () => api.get('/certificates/me').then(unwrap),
+   get: (id) => api.get(`/certificates/${id}`).then(unwrap),
+-  downloadUrl: (id) => `/api/certificates/${id}/download`,
++  downloadUrl: (id) => `${API_BASE_URL.replace(/\/$/, '')}/certificates/${id}/download`,
+   validate: (code) => api.get(`/certificates/validate/${code}`).then(unwrap),
+   issue: (data) => api.post('/certificates/issue', data).then(unwrap),
+   auto: (eventId) => api.post(`/certificates/auto/${eventId}`).then(unwrap),
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminAtividades.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminAtividades.jsx
+--- /tmp/orig/academica/frontend/src/pages/admin/AdminAtividades.jsx	2026-09-10 23:15:42.000000000 +0000
++++ /tmp/acade/academica/frontend/src/pages/admin/AdminAtividades.jsx	2026-09-11 15:11:38.951555655 +0000
+@@ -24,8 +24,10 @@
+   );
+ 
+   const allActivities = data || [];
+-  // Server list for admin is flat; filter pages are simulated client-side for simplicity.
+-  const filtered = eventId ? allActivities : allActivities;
++  // The API returns the full (already event-filtered) list; paginate client-side.
++  const pageSize = 10;
++  const totalPages = Math.max(1, Math.ceil(allActivities.length / pageSize));
++  const pageItems = allActivities.slice((page - 1) * pageSize, page * pageSize);
+ 
+   const duplicate = async (id) => {
+     try { await activityApi.duplicate(id); toast.success('Atividade duplicada.'); reload(); }
+@@ -89,8 +91,8 @@
+ 
+       {loading && <Spinner text="Carregando atividades..." />}
+       {error && <ErrorState onRetry={reload} />}
+-      {!loading && !error && <DataTable columns={columns} rows={filtered} loading={loading} emptyTitle="Nenhuma atividade." emptyDescription="Crie atividades para seus eventos." />}
+-      <Pagination page={page} pages={Math.ceil(filtered.length / 10)} onPage={setPage} />
++      {!loading && !error && <DataTable columns={columns} rows={pageItems} loading={loading} emptyTitle="Nenhuma atividade." emptyDescription="Crie atividades para seus eventos." />}
++      <Pagination page={page} pages={totalPages} onPage={setPage} />
+ 
+       <ConfirmDialog open={!!toDelete} title="Excluir atividade" message="Esta atividade e seus registros serão excluídos." confirmLabel="Excluir" danger loading={busy} onConfirm={remove} onClose={() => setToDelete(null)} />
+       <ConfirmDialog open={!!toClose} title="Encerrar atividade" message="Deseja encerrar esta atividade? Ela passará a não aceitar novas inscrições nem registro de presença." confirmLabel="Encerrar" loading={busy} onConfirm={close} onClose={() => setToClose(null)} />
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminEventoForm.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminEventoForm.jsx
+--- /tmp/orig/academica/frontend/src/pages/admin/AdminEventoForm.jsx	2026-09-10 15:27:06.000000000 +0000
++++ /tmp/acade/academica/frontend/src/pages/admin/AdminEventoForm.jsx	2026-09-11 15:11:32.715507116 +0000
+@@ -15,15 +15,33 @@
+   certificateHours: 8,
+ };
+ 
++// Pick only the editable scalar fields. Spreading the whole GET payload used to
++// drag relation objects (`institution`, `organizer`, `activities`, `_count`,
++// `capacityProgress`) into the FormData, which the backend then rejected.
+ function toForm(event) {
+   return {
+     ...empty,
+-    ...event,
++    name: event.name ?? '',
++    shortDescription: event.shortDescription ?? '',
++    description: event.description ?? '',
+     startDate: event.startDate ? event.startDate.slice(0, 10) : '',
+     endDate: event.endDate ? event.endDate.slice(0, 10) : '',
++    startTime: event.startTime ?? empty.startTime,
++    location: event.location ?? '',
++    address: event.address ?? '',
++    modality: event.modality ?? empty.modality,
++    category: event.category ?? '',
++    capacity: event.capacity ?? '',
+     registrationStart: event.registrationStart ? event.registrationStart.slice(0, 10) : '',
+     registrationEnd: event.registrationEnd ? event.registrationEnd.slice(0, 10) : '',
+-    capacity: event.capacity ?? '',
++    status: event.status ?? empty.status,
++    allowRegistration: event.allowRegistration ?? true,
++    allowCancellation: event.allowCancellation ?? true,
++    requireActivityRegistration: event.requireActivityRegistration ?? false,
++    requireAttendance: event.requireAttendance ?? true,
++    automaticCertificate: event.automaticCertificate ?? false,
++    minimumAttendancePercentage: event.minimumAttendancePercentage ?? 75,
++    certificateHours: event.certificateHours ?? 8,
+   };
+ }
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminOperador.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminOperador.jsx
+--- /tmp/orig/academica/frontend/src/pages/admin/AdminOperador.jsx	2026-09-10 15:27:32.000000000 +0000
++++ /tmp/acade/academica/frontend/src/pages/admin/AdminOperador.jsx	2026-09-11 15:15:33.373380225 +0000
+@@ -19,6 +19,7 @@
+   const [found, setFound] = useState(null);
+   const [busy, setBusy] = useState(false);
+   const scannerRef = useRef(null);
++  const processingRef = useRef(false);
+   const camId = 'qr-reader';
+ 
+   const events = useApi(() => eventApi.list({ limit: 100 }).then((r) => r.data.events), []);
+@@ -27,14 +28,13 @@
+   // Cleanup camera on unmount
+   useEffect(() => () => { stopScanner(); /* eslint-disable-next-line */ }, []);
+ 
+-  function stopScanner() {
+-    if (scannerRef.current) {
+-      try { scannerRef.current.stop().catch(() => {}); } catch { /* ignore */ }
+-      scannerRef.current = null;
++  async function stopScanner() {
++    const scanner = scannerRef.current;
++    scannerRef.current = null;
++    if (scanner) {
++      try { await scanner.stop(); } catch { /* ignore */ }
++      try { scanner.clear(); } catch { /* ignore */ }
+     }
+-    // Remove leftover video/canvas so a later start reuses a clean container.
+-    const el = document.getElementById(camId);
+-    if (el) el.innerHTML = '';
+   }
+ 
+   const startScanner = async () => {
+@@ -42,22 +42,31 @@
+     setError(null);
+     setResult(null);
+     try {
+-      stopScanner();
++      await stopScanner();
+       const scanner = new Html5Qrcode(camId);
+       scannerRef.current = scanner;
+       await scanner.start(
+         { facingMode: 'environment' },
+         { fps: 10, qrbox: { width: 250, height: 250 } },
+-        (decodedText) => {
+-          stopScanner();
++        async (decodedText) => {
++          // Ignore reads while a previous one is being processed (prevents
++          // duplicate submissions from the continuous scanner).
++          if (processingRef.current) return;
++          processingRef.current = true;
++          await stopScanner();
+           setScanning(false);
+-          handleCode(decodedText);
++          try { await handleCode(decodedText); } finally { processingRef.current = false; }
+         },
+         () => { /* decode errors ignored */ }
+       );
+       setScanning(true);
+     } catch (e) {
+-      toast.error('Não foi possível acessar a câmera. Use a digitação manual ou conceda permissão.');
++      const denied = e?.name === 'NotAllowedError' || /permission|denied|not allowed/i.test(String(e?.message || ''));
++      toast.error(
++        denied
++          ? 'Permissão de câmera negada. Autorize o acesso à câmera nas configurações do navegador para escanear o QR Code.'
++          : 'Não foi possível acessar a câmera. Verifique se o dispositivo possui câmera ou use a digitação manual.'
++      );
+       setScanning(false);
+     }
+   };
+@@ -131,21 +140,21 @@
+       </div>
+ 
+       <div className="card card-pad mb-3">
+-        {!scanning ? (
+-          <div>
+-            <div className="operator__cam" style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
++        {/* The reader container is ALWAYS mounted in the same position so the
++            Html5Qrcode video/canvas is never detached by a re-render. */}
++        <div className="operator__cam" style={{ position: 'relative', minHeight: 220 }}>
++          <div id={camId} />
++          {!scanning && (
++            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
+               <div className="text-center">
+                 <Camera size={40} style={{ margin: '0 auto 10px' }} />
+                 <p style={{ margin: 0 }}>Câmera desligada. Toque em "Ligar câmera".</p>
+               </div>
+             </div>
+-            <div id={camId} />
+-          </div>
+-        ) : (
+-          <div>
+-            <div className="operator__cam"><div id={camId} /></div>
+-            <Button variant="secondary" className="btn--block mt-2" onClick={() => { stopScanner(); setScanning(false); }}>Desligar câmera</Button>
+-          </div>
++          )}
++        </div>
++        {scanning && (
++          <Button variant="secondary" className="btn--block mt-2" onClick={async () => { await stopScanner(); setScanning(false); }}>Desligar câmera</Button>
+         )}
+ 
+         <form className="operator__manual" onSubmit={handleManualSubmit}>
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminTelao.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminTelao.jsx
+--- /tmp/orig/academica/frontend/src/pages/admin/AdminTelao.jsx	2026-09-09 14:36:48.000000000 +0000
++++ /tmp/acade/academica/frontend/src/pages/admin/AdminTelao.jsx	2026-09-11 15:15:33.373380225 +0000
+@@ -14,24 +14,49 @@
+   const [error, setError] = useState(null);
+   const [name, setName] = useState('');
+   const scannerRef = useRef(null);
++  const processingRef = useRef(false);
+   const camId = 'telao-reader';
+ 
+   const events = useApi(() => eventApi.list({ limit: 100 }).then((r) => r.data.events), []);
+   const activities = useApi(() => (eventId ? eventApi.get(eventId).then((r) => r.data.activities) : Promise.resolve([])), [eventId]);
+ 
+-  useEffect(() => () => { if (scannerRef.current) { try { scannerRef.current.stop(); } catch { /* */ } } }, []);
++  useEffect(() => () => { stop(); }, []);
++
++  async function stop() {
++    const scanner = scannerRef.current;
++    scannerRef.current = null;
++    if (scanner) {
++      try { await scanner.stop(); } catch { /* */ }
++      try { scanner.clear(); } catch { /* */ }
++    }
++    setStarted(false);
++  }
+ 
+   const start = async () => {
+     if (!activityId) return;
+     setResult(null); setError(null);
+-    if (scannerRef.current) { try { scannerRef.current.stop(); } catch { /* */ } }
++    await stop();
+     const scanner = new Html5Qrcode(camId);
+     scannerRef.current = scanner;
+     try {
+-      await scanner.start({ facingMode: 'environment' }, { fps: 8, qrbox: { width: 280, height: 280 } }, handleScan, () => {});
++      await scanner.start(
++        { facingMode: 'environment' },
++        { fps: 8, qrbox: { width: 280, height: 280 } },
++        async (code) => {
++          if (processingRef.current) return;
++          processingRef.current = true;
++          try { await handleScan(code); } finally { processingRef.current = false; }
++        },
++        () => {}
++      );
+       setStarted(true);
+-    } catch {
+-      setError('Não foi possível acessar a câmera.');
++    } catch (e) {
++      const denied = e?.name === 'NotAllowedError' || /permission|denied|not allowed/i.test(String(e?.message || ''));
++      setError(
++        denied
++          ? 'Permissão de câmera negada. Autorize o acesso no navegador e tente novamente.'
++          : 'Não foi possível acessar a câmera.'
++      );
+       setStarted(false);
+     }
+   };
+@@ -89,12 +114,15 @@
+               </Select>
+             </Field>
+           </div>
+-          <div style={{ width: 380, height: 380, background: '#000', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
+-            {started ? <div id={camId} /> : <div style={{ height: 380, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>Câmera inativa</div>}
++          {/* The reader container must exist before Html5Qrcode is created and
++              must not be unmounted by a re-render, or the camera never starts. */}
++          <div style={{ position: 'relative', width: 380, height: 380, background: '#000', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
++            <div id={camId} />
++            {!started && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>Câmera inativa</div>}
+           </div>
+           {error && <p style={{ color: '#f87171' }}>{error}</p>}
+           {!started && <Button className="btn--lg" onClick={start}>Iniciar leitura</Button>}
+-          {started && <Button variant="secondary" onClick={() => { try { scannerRef.current?.stop(); } catch { /* */ } setStarted(false); }}>Parar</Button>}
++          {started && <Button variant="secondary" onClick={stop}>Parar</Button>}
+         </>
+       )}
+     </div>

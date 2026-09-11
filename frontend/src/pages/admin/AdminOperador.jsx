@@ -19,6 +19,7 @@ export default function AdminOperador() {
   const [found, setFound] = useState(null);
   const [busy, setBusy] = useState(false);
   const scannerRef = useRef(null);
+  const processingRef = useRef(false);
   const camId = 'qr-reader';
 
   const events = useApi(() => eventApi.list({ limit: 100 }).then((r) => r.data.events), []);
@@ -27,14 +28,13 @@ export default function AdminOperador() {
   // Cleanup camera on unmount
   useEffect(() => () => { stopScanner(); /* eslint-disable-next-line */ }, []);
 
-  function stopScanner() {
-    if (scannerRef.current) {
-      try { scannerRef.current.stop().catch(() => {}); } catch { /* ignore */ }
-      scannerRef.current = null;
+  async function stopScanner() {
+    const scanner = scannerRef.current;
+    scannerRef.current = null;
+    if (scanner) {
+      try { await scanner.stop(); } catch { /* ignore */ }
+      try { scanner.clear(); } catch { /* ignore */ }
     }
-    // Remove leftover video/canvas so a later start reuses a clean container.
-    const el = document.getElementById(camId);
-    if (el) el.innerHTML = '';
   }
 
   const startScanner = async () => {
@@ -42,22 +42,31 @@ export default function AdminOperador() {
     setError(null);
     setResult(null);
     try {
-      stopScanner();
+      await stopScanner();
       const scanner = new Html5Qrcode(camId);
       scannerRef.current = scanner;
       await scanner.start(
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
-        (decodedText) => {
-          stopScanner();
+        async (decodedText) => {
+          // Ignore reads while a previous one is being processed (prevents
+          // duplicate submissions from the continuous scanner).
+          if (processingRef.current) return;
+          processingRef.current = true;
+          await stopScanner();
           setScanning(false);
-          handleCode(decodedText);
+          try { await handleCode(decodedText); } finally { processingRef.current = false; }
         },
         () => { /* decode errors ignored */ }
       );
       setScanning(true);
     } catch (e) {
-      toast.error('Não foi possível acessar a câmera. Use a digitação manual ou conceda permissão.');
+      const denied = e?.name === 'NotAllowedError' || /permission|denied|not allowed/i.test(String(e?.message || ''));
+      toast.error(
+        denied
+          ? 'Permissão de câmera negada. Autorize o acesso à câmera nas configurações do navegador para escanear o QR Code.'
+          : 'Não foi possível acessar a câmera. Verifique se o dispositivo possui câmera ou use a digitação manual.'
+      );
       setScanning(false);
     }
   };
@@ -131,21 +140,21 @@ export default function AdminOperador() {
       </div>
 
       <div className="card card-pad mb-3">
-        {!scanning ? (
-          <div>
-            <div className="operator__cam" style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
+        {/* The reader container is ALWAYS mounted in the same position so the
+            Html5Qrcode video/canvas is never detached by a re-render. */}
+        <div className="operator__cam" style={{ position: 'relative', minHeight: 220 }}>
+          <div id={camId} />
+          {!scanning && (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
               <div className="text-center">
                 <Camera size={40} style={{ margin: '0 auto 10px' }} />
                 <p style={{ margin: 0 }}>Câmera desligada. Toque em "Ligar câmera".</p>
               </div>
             </div>
-            <div id={camId} />
-          </div>
-        ) : (
-          <div>
-            <div className="operator__cam"><div id={camId} /></div>
-            <Button variant="secondary" className="btn--block mt-2" onClick={() => { stopScanner(); setScanning(false); }}>Desligar câmera</Button>
-          </div>
+          )}
+        </div>
+        {scanning && (
+          <Button variant="secondary" className="btn--block mt-2" onClick={async () => { await stopScanner(); setScanning(false); }}>Desligar câmera</Button>
         )}
 
         <form className="operator__manual" onSubmit={handleManualSubmit}>

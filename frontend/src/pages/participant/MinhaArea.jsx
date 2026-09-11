@@ -6,7 +6,7 @@ import { useApi } from '../../hooks/useApi';
 import { useAuth } from '../../context/AuthContext';
 import { DashboardCard } from '../../components/Cards';
 import { Spinner, ErrorState, EmptyState } from '../../components/ui';
-import { formatDate } from '../../utils/format';
+import { formatDate, calendarDayKey, todayKey } from '../../utils/format';
 
 export default function MinhaArea() {
   const { user } = useAuth();
@@ -28,12 +28,19 @@ export default function MinhaArea() {
   const loading = regs.loading || certs.loading;
   const nextActivity = useMemo(() => {
     const upcoming = [];
+    const today = todayKey();
     (regs.data || []).forEach((r) =>
       (r.activityRegistrations || []).forEach((ar) => {
-        if (new Date(ar.activity.date) >= new Date()) upcoming.push({ ...ar.activity, registrationId: r.id });
+        // Compare CALENDAR DAYS so an activity TODAY still counts as upcoming
+        // (comparing UTC-midnight instants hid today's activity in UTC-3).
+        if (calendarDayKey(ar.activity.date) >= today) upcoming.push({ ...ar.activity, registrationId: r.id });
       })
     );
-    upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
+    upcoming.sort(
+      (a, b) =>
+        calendarDayKey(a.date).localeCompare(calendarDayKey(b.date)) ||
+        (a.startTime || '').localeCompare(b.startTime || '')
+    );
     return upcoming[0] || null;
   }, [regs.data]);
 

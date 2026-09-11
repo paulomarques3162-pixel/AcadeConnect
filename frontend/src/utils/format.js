@@ -37,6 +37,34 @@ export function toDateInputValue(value) {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Chave de DIA DE CALENDÁRIO (YYYY-MM-DD) para um valor de data.
+ *
+ * Datas de evento/atividade são dias de calendário gravados como meia-noite
+ * UTC (ex.: "2026-09-01T00:00:00.000Z"). Nesse caso o dia é exatamente os 10
+ * primeiros caracteres — nunca deve ser convertido para o fuso local, senão
+ * vira 31/08 em UTC-3.
+ *
+ * Valores que são instantes reais (ex.: createdAt) ou Date locais usam os
+ * componentes locais, que é o dia que o usuário enxerga.
+ */
+export function calendarDayKey(value) {
+  if (!value) return '';
+  const s = String(value);
+  if (isDateOnly(value)) return s.slice(0, 10);
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Dia de calendário de hoje no fuso do usuário (YYYY-MM-DD). */
+export function todayKey() {
+  return calendarDayKey(new Date());
+}
+
 export function formatNumber(n) {
   if (n === null || n === undefined) return '0';
   return Number(n).toLocaleString('pt-BR');

@@ -1,7 +1,7 @@
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/RELATORIO_AUDITORIA.md /tmp/acade/academica/RELATORIO_AUDITORIA.md
 --- /tmp/orig/academica/RELATORIO_AUDITORIA.md	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/acade/academica/RELATORIO_AUDITORIA.md	2026-09-11 15:23:28.349077118 +0000
-@@ -0,0 +1,155 @@
++++ /tmp/acade/academica/RELATORIO_AUDITORIA.md	2026-09-11 16:00:32.146604929 +0000
+@@ -0,0 +1,174 @@
 +# Relatório de Auditoria Técnica — Mustangs Atlética / AcadeConnect
 +
 +Auditoria completa (frontend, backend, banco e QR Code) com **correção de bugs** e **testes de ponta a ponta** executados em ambiente real (PostgreSQL 15 + Node 22 + React/Vite).
@@ -29,6 +29,7 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
 +| 11 | **Baixa** | **Registro em evento que exige atividade aceitava inscrição sem nenhuma atividade.** | `POST /registrations/:eventId` com `activityIds: []` |
 +| 12 | **Baixa** | **`updateInstitution` / `updateSpeaker` repassavam `req.body` inteiro ao Prisma** (mesma classe do bug #1: erro de validação e save descartado). | Leitura + teste de padrão |
 +| 13 | **Média** | **`registrationEnd` gravado à meia-noite no create.** O Joi convertia a data para `Date` antes do controller, e o `endOfDay: true` era perdido. Resultado: o prazo final fechava no **início** do dia no create e no **fim** do dia no update (janela de inscrição inconsistente). | `create` → `2026-03-10T00:00:00Z`; `update` → `2026-04-30T23:59:59.999Z` |
++| 14 | **Média** | **Comparação de datas por INSTANTE em vez de DIA DE CALENDÁRIO.** No calendário do dashboard e em “Próxima atividade”, um evento de segunda (gravado como meia-noite UTC) caía no **domingo** em UTC-3, e uma atividade de **hoje** não aparecia como próxima. No detalhe do evento, as atividades eram agrupadas pelo dia local, podendo separar/juntar dias diferente do exibido. | `new Date(startDate) >= weekStart` (local) deslocava o dia |
 +
 +---
 +
@@ -43,6 +44,11 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
 +- **`reportController`** — não mistura mais status de inscrição com status de presença/certificado; presentes = participantes distintos com presença; ausentes = inscritos − presentes; percentual limitado a 100%.
 +- **`pdf.js`** — datas do certificado em **UTC** (dia correto).
 +- **`utils/date.js`** — `parseDate` agora preserva o `endOfDay` também quando o valor já chega como `Date` (caso do Joi no create), deixando create e update consistentes.
++- **`frontend/utils/format.js`** — nova função `calendarDayKey()` (YYYY-MM-DD do **dia de calendário**) e `todayKey()`. Datas UTC-midnight usam o dia codificado no próprio ISO; timestamps reais usam o dia local. Base única para comparar/exibir datas.
++- **`AdminDashboard.jsx`** — calendário semanal compara **dias de calendário** (`calendarDayKey`), sem deslocar o evento de dia; o horário nunca é derivado da data (antes um evento sem `startTime` aparecia como 21:00).
++- **`EventDetail.jsx`** — programação agrupada por **dia de calendário** (UTC), igual ao dia exibido.
++- **`MinhaArea.jsx`** — “Próxima atividade” compara dias de calendário (inclui o **hoje**) e ordena por dia + horário.
++- **`registrationController.js`** — ano do código de inscrição usa `getUTCFullYear` (evita virada de ano em 31/12 em UTC-3).
 +- **`adminController.updateInstitution` / `speakerController.updateSpeaker`** — whitelist de campos.
 +- **`frontend/api/client.js` + `services.js`** — expõem `API_BASE_URL`; `downloadUrl` respeita `VITE_API_URL`.
 +- **`AdminEventoForm`** — `toForm` envia apenas campos editáveis (defesa extra).
@@ -136,7 +142,16 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
 +
 +Resultado: **29/29 verificações PASS** (incluindo o fuso brasileiro).
 +
-+## Arquivos alterados (17)
++## 9. Regra definitiva de datas (aplicada)
++
++- **Data de evento = dia de calendário**, não instante. Gravada como meia-noite UTC do dia escolhido (`2026-09-01` → `2026-09-01T00:00:00.000Z`).
++- **Horário de evento = campo próprio** (`startTime`/`endTime`, string `HH:mm`), separado da data. Nunca derivado da data.
++- **Entrada** (`<input type="date">`) trafega como `YYYY-MM-DD`; **armazenamento** meia-noite UTC; **exibição** sempre em UTC para datas de calendário (`timeZone: 'UTC'`), o que mantém `01/09/2026` como `01/09/2026` em qualquer fuso.
++- **Comparações** (calendário do dashboard, próxima atividade) usam **dia de calendário** via `calendarDayKey()`, nunca instantes.
++- **Atualização** só grava colunas permitidas; campos relacionais/calculados são descartados.
++- Fuso de referência dos testes: **America/Sao_Paulo (UTC-3)**.
++
++## Arquivos alterados (21)
 +
 +```
 +backend/src/controllers/eventController.js
@@ -152,6 +167,10 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
 +backend/src/utils/date.js
 +frontend/src/api/client.js
 +frontend/src/api/services.js
++frontend/src/utils/format.js
++frontend/src/pages/EventDetail.jsx
++frontend/src/pages/participant/MinhaArea.jsx
++frontend/src/pages/admin/AdminDashboard.jsx
 +frontend/src/pages/admin/AdminEventoForm.jsx
 +frontend/src/pages/admin/AdminAtividades.jsx
 +frontend/src/pages/admin/AdminOperador.jsx
@@ -358,7 +377,7 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
  
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/registrationController.js /tmp/acade/academica/backend/src/controllers/registrationController.js
 --- /tmp/orig/academica/backend/src/controllers/registrationController.js	2026-09-11 12:07:30.000000000 +0000
-+++ /tmp/acade/academica/backend/src/controllers/registrationController.js	2026-09-11 15:11:28.135471472 +0000
++++ /tmp/acade/academica/backend/src/controllers/registrationController.js	2026-09-11 15:59:27.418101142 +0000
 @@ -64,6 +64,9 @@
  
    // Validate selected activities belong to event & have capacity.
@@ -369,6 +388,21 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
    for (const a of validActivities) {
      if (!a.allowsRegistration) throw new ApiError(409, `A atividade "${a.name}" não aceita inscrição.`);
      if (a.capacity) {
+@@ -73,10 +76,12 @@
+   }
+ 
+   // Generate unique registration code.
+-  let code = generateRegistrationCode(event.startDate.getFullYear());
++  // Use the UTC year: event dates are calendar days stored as UTC-midnight, so
++  // getFullYear() could return the previous year on 31/12 in UTC-3.
++  let code = generateRegistrationCode(event.startDate.getUTCFullYear());
+   for (let i = 0; i < 6; i += 1) {
+     if (!(await prisma.registration.findUnique({ where: { code } }))) break;
+-    code = generateRegistrationCode(event.startDate.getFullYear());
++    code = generateRegistrationCode(event.startDate.getUTCFullYear());
+   }
+   const qrToken = generateQrToken();
+ 
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/reportController.js /tmp/acade/academica/backend/src/controllers/reportController.js
 --- /tmp/orig/academica/backend/src/controllers/reportController.js	2026-09-09 14:21:48.000000000 +0000
 +++ /tmp/acade/academica/backend/src/controllers/reportController.js	2026-09-11 15:17:08.054117161 +0000
@@ -631,6 +665,30 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
    validate: (code) => api.get(`/certificates/validate/${code}`).then(unwrap),
    issue: (data) => api.post('/certificates/issue', data).then(unwrap),
    auto: (eventId) => api.post(`/certificates/auto/${eventId}`).then(unwrap),
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/EventDetail.jsx /tmp/acade/academica/frontend/src/pages/EventDetail.jsx
+--- /tmp/orig/academica/frontend/src/pages/EventDetail.jsx	2026-09-11 14:18:46.000000000 +0000
++++ /tmp/acade/academica/frontend/src/pages/EventDetail.jsx	2026-09-11 15:59:21.522055251 +0000
+@@ -7,7 +7,7 @@
+ import { useToast } from '../context/ToastContext';
+ import { Button, Spinner, ErrorState, StatusBadge, Checkbox, SmartImage } from '../components/ui';
+ import { QRCodeCard } from '../components/Cards';
+-import { formatDate, formatNumber, ACTIVITY_TYPE_LABELS, MODALITY_LABELS, fullNameInitials } from '../utils/format';
++import { formatDate, formatNumber, ACTIVITY_TYPE_LABELS, MODALITY_LABELS, fullNameInitials, calendarDayKey } from '../utils/format';
+ 
+ export default function EventDetail() {
+   const { idOrSlug } = useParams();
+@@ -22,7 +22,10 @@
+   const event = data;
+ 
+   const grouped = (event?.activities || []).reduce((acc, a) => {
+-    const key = new Date(a.date).toDateString();
++    // Group by CALENDAR DAY (UTC day for UTC-midnight dates). Using
++    // new Date(a.date).toDateString() grouped by the local day and could split
++    // or merge days differently from the date actually displayed.
++    const key = calendarDayKey(a.date);
+     (acc[key] = acc[key] || []).push(a);
+     return acc;
+   }, {});
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminAtividades.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminAtividades.jsx
 --- /tmp/orig/academica/frontend/src/pages/admin/AdminAtividades.jsx	2026-09-10 23:15:42.000000000 +0000
 +++ /tmp/acade/academica/frontend/src/pages/admin/AdminAtividades.jsx	2026-09-11 15:11:38.951555655 +0000
@@ -658,6 +716,58 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
  
        <ConfirmDialog open={!!toDelete} title="Excluir atividade" message="Esta atividade e seus registros serão excluídos." confirmLabel="Excluir" danger loading={busy} onConfirm={remove} onClose={() => setToDelete(null)} />
        <ConfirmDialog open={!!toClose} title="Encerrar atividade" message="Deseja encerrar esta atividade? Ela passará a não aceitar novas inscrições nem registro de presença." confirmLabel="Encerrar" loading={busy} onConfirm={close} onClose={() => setToClose(null)} />
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminDashboard.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminDashboard.jsx
+--- /tmp/orig/academica/frontend/src/pages/admin/AdminDashboard.jsx	2026-09-09 23:32:22.000000000 +0000
++++ /tmp/acade/academica/frontend/src/pages/admin/AdminDashboard.jsx	2026-09-11 15:59:21.522055251 +0000
+@@ -12,7 +12,7 @@
+ import { useAuth } from '../../context/AuthContext';
+ import { DashboardCard } from '../../components/Cards';
+ import { Spinner, ErrorState, Card } from '../../components/ui';
+-import { formatNumber } from '../../utils/format';
++import { formatNumber, calendarDayKey } from '../../utils/format';
+ 
+ const PIE_COLORS = ['#166534', '#d4af37', '#15803d', '#b8942b', '#22c55e', '#0f766e'];
+ 
+@@ -28,10 +28,10 @@
+ const WEEK_LABELS = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira'];
+ 
+ function formatTime(dateStr, startTime) {
+-  if (startTime) return startTime;
+-  if (!dateStr) return '';
+-  const d = new Date(dateStr);
+-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
++  // The event time is its own field (startTime). Never derive a time from the
++  // calendar date — doing so leaked the UTC offset (a UTC-midnight date showed
++  // as 21:00 in UTC-3).
++  return startTime || '';
+ }
+ 
+ function currentWeekDays() {
+@@ -55,16 +55,16 @@
+   const { data: allEvents } = useApi(() => eventApi.list({ limit: 200 }).then((r) => r.data.events), []);
+ 
+   const weekDays = currentWeekDays();
+-  const weekStart = weekDays[0];
+-  const weekEnd = new Date(weekDays[4]);
+-  weekEnd.setDate(weekEnd.getDate() + 1);
+-  const weekEvents = (allEvents || []).filter((e) => e.startDate && new Date(e.startDate) >= weekStart && new Date(e.startDate) < weekEnd);
++  // Compare CALENDAR DAYS, not instants. `startDate` is a calendar day stored
++  // as UTC-midnight, so comparing with local Date boundaries placed the event
++  // on the previous weekday in UTC-3 (or dropped it from the week).
++  const dayKeys = weekDays.map((d) => calendarDayKey(d));
++  const weekEvents = (allEvents || []).filter((e) => e.startDate && dayKeys.includes(calendarDayKey(e.startDate)));
+   const weekByDay = weekDays.map((day, i) => {
+-    const next = new Date(day);
+-    next.setDate(day.getDate() + 1);
++    const key = dayKeys[i];
+     const list = weekEvents
+-      .filter((e) => new Date(e.startDate) >= day && new Date(e.startDate) < next)
+-      .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
++      .filter((e) => calendarDayKey(e.startDate) === key)
++      .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+     return { label: WEEK_LABELS[i], date: day, events: list };
+   });
+ 
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminEventoForm.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminEventoForm.jsx
 --- /tmp/orig/academica/frontend/src/pages/admin/AdminEventoForm.jsx	2026-09-10 15:27:06.000000000 +0000
 +++ /tmp/acade/academica/frontend/src/pages/admin/AdminEventoForm.jsx	2026-09-11 15:11:32.715507116 +0000
@@ -875,3 +985,75 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
          </>
        )}
      </div>
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/participant/MinhaArea.jsx /tmp/acade/academica/frontend/src/pages/participant/MinhaArea.jsx
+--- /tmp/orig/academica/frontend/src/pages/participant/MinhaArea.jsx	2026-09-09 14:33:40.000000000 +0000
++++ /tmp/acade/academica/frontend/src/pages/participant/MinhaArea.jsx	2026-09-11 15:59:27.418101142 +0000
+@@ -6,7 +6,7 @@
+ import { useAuth } from '../../context/AuthContext';
+ import { DashboardCard } from '../../components/Cards';
+ import { Spinner, ErrorState, EmptyState } from '../../components/ui';
+-import { formatDate } from '../../utils/format';
++import { formatDate, calendarDayKey, todayKey } from '../../utils/format';
+ 
+ export default function MinhaArea() {
+   const { user } = useAuth();
+@@ -28,12 +28,19 @@
+   const loading = regs.loading || certs.loading;
+   const nextActivity = useMemo(() => {
+     const upcoming = [];
++    const today = todayKey();
+     (regs.data || []).forEach((r) =>
+       (r.activityRegistrations || []).forEach((ar) => {
+-        if (new Date(ar.activity.date) >= new Date()) upcoming.push({ ...ar.activity, registrationId: r.id });
++        // Compare CALENDAR DAYS so an activity TODAY still counts as upcoming
++        // (comparing UTC-midnight instants hid today's activity in UTC-3).
++        if (calendarDayKey(ar.activity.date) >= today) upcoming.push({ ...ar.activity, registrationId: r.id });
+       })
+     );
+-    upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
++    upcoming.sort(
++      (a, b) =>
++        calendarDayKey(a.date).localeCompare(calendarDayKey(b.date)) ||
++        (a.startTime || '').localeCompare(b.startTime || '')
++    );
+     return upcoming[0] || null;
+   }, [regs.data]);
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/utils/format.js /tmp/acade/academica/frontend/src/utils/format.js
+--- /tmp/orig/academica/frontend/src/utils/format.js	2026-09-11 14:18:03.000000000 +0000
++++ /tmp/acade/academica/frontend/src/utils/format.js	2026-09-11 15:59:06.673939689 +0000
+@@ -37,6 +37,34 @@
+   return d.toISOString().slice(0, 10);
+ }
+ 
++/**
++ * Chave de DIA DE CALENDÁRIO (YYYY-MM-DD) para um valor de data.
++ *
++ * Datas de evento/atividade são dias de calendário gravados como meia-noite
++ * UTC (ex.: "2026-09-01T00:00:00.000Z"). Nesse caso o dia é exatamente os 10
++ * primeiros caracteres — nunca deve ser convertido para o fuso local, senão
++ * vira 31/08 em UTC-3.
++ *
++ * Valores que são instantes reais (ex.: createdAt) ou Date locais usam os
++ * componentes locais, que é o dia que o usuário enxerga.
++ */
++export function calendarDayKey(value) {
++  if (!value) return '';
++  const s = String(value);
++  if (isDateOnly(value)) return s.slice(0, 10);
++  const d = new Date(value);
++  if (Number.isNaN(d.getTime())) return '';
++  const y = d.getFullYear();
++  const m = String(d.getMonth() + 1).padStart(2, '0');
++  const day = String(d.getDate()).padStart(2, '0');
++  return `${y}-${m}-${day}`;
++}
++
++/** Dia de calendário de hoje no fuso do usuário (YYYY-MM-DD). */
++export function todayKey() {
++  return calendarDayKey(new Date());
++}
++
+ export function formatNumber(n) {
+   if (n === null || n === undefined) return '0';
+   return Number(n).toLocaleString('pt-BR');

@@ -25,6 +25,7 @@ Foram reproduzidos em execução real (não apenas por leitura de código):
 | 11 | **Baixa** | **Registro em evento que exige atividade aceitava inscrição sem nenhuma atividade.** | `POST /registrations/:eventId` com `activityIds: []` |
 | 12 | **Baixa** | **`updateInstitution` / `updateSpeaker` repassavam `req.body` inteiro ao Prisma** (mesma classe do bug #1: erro de validação e save descartado). | Leitura + teste de padrão |
 | 13 | **Média** | **`registrationEnd` gravado à meia-noite no create.** O Joi convertia a data para `Date` antes do controller, e o `endOfDay: true` era perdido. Resultado: o prazo final fechava no **início** do dia no create e no **fim** do dia no update (janela de inscrição inconsistente). | `create` → `2026-03-10T00:00:00Z`; `update` → `2026-04-30T23:59:59.999Z` |
+| 14 | **Média** | **Comparação de datas por INSTANTE em vez de DIA DE CALENDÁRIO.** No calendário do dashboard e em “Próxima atividade”, um evento de segunda (gravado como meia-noite UTC) caía no **domingo** em UTC-3, e uma atividade de **hoje** não aparecia como próxima. No detalhe do evento, as atividades eram agrupadas pelo dia local, podendo separar/juntar dias diferente do exibido. | `new Date(startDate) >= weekStart` (local) deslocava o dia |
 
 ---
 
@@ -39,6 +40,11 @@ Foram reproduzidos em execução real (não apenas por leitura de código):
 - **`reportController`** — não mistura mais status de inscrição com status de presença/certificado; presentes = participantes distintos com presença; ausentes = inscritos − presentes; percentual limitado a 100%.
 - **`pdf.js`** — datas do certificado em **UTC** (dia correto).
 - **`utils/date.js`** — `parseDate` agora preserva o `endOfDay` também quando o valor já chega como `Date` (caso do Joi no create), deixando create e update consistentes.
+- **`frontend/utils/format.js`** — nova função `calendarDayKey()` (YYYY-MM-DD do **dia de calendário**) e `todayKey()`. Datas UTC-midnight usam o dia codificado no próprio ISO; timestamps reais usam o dia local. Base única para comparar/exibir datas.
+- **`AdminDashboard.jsx`** — calendário semanal compara **dias de calendário** (`calendarDayKey`), sem deslocar o evento de dia; o horário nunca é derivado da data (antes um evento sem `startTime` aparecia como 21:00).
+- **`EventDetail.jsx`** — programação agrupada por **dia de calendário** (UTC), igual ao dia exibido.
+- **`MinhaArea.jsx`** — “Próxima atividade” compara dias de calendário (inclui o **hoje**) e ordena por dia + horário.
+- **`registrationController.js`** — ano do código de inscrição usa `getUTCFullYear` (evita virada de ano em 31/12 em UTC-3).
 - **`adminController.updateInstitution` / `speakerController.updateSpeaker`** — whitelist de campos.
 - **`frontend/api/client.js` + `services.js`** — expõem `API_BASE_URL`; `downloadUrl` respeita `VITE_API_URL`.
 - **`AdminEventoForm`** — `toForm` envia apenas campos editáveis (defesa extra).
@@ -132,7 +138,16 @@ Teste automatizado cobrindo criar → salvar → recarregar → editar → salva
 
 Resultado: **29/29 verificações PASS** (incluindo o fuso brasileiro).
 
-## Arquivos alterados (17)
+## 9. Regra definitiva de datas (aplicada)
+
+- **Data de evento = dia de calendário**, não instante. Gravada como meia-noite UTC do dia escolhido (`2026-09-01` → `2026-09-01T00:00:00.000Z`).
+- **Horário de evento = campo próprio** (`startTime`/`endTime`, string `HH:mm`), separado da data. Nunca derivado da data.
+- **Entrada** (`<input type="date">`) trafega como `YYYY-MM-DD`; **armazenamento** meia-noite UTC; **exibição** sempre em UTC para datas de calendário (`timeZone: 'UTC'`), o que mantém `01/09/2026` como `01/09/2026` em qualquer fuso.
+- **Comparações** (calendário do dashboard, próxima atividade) usam **dia de calendário** via `calendarDayKey()`, nunca instantes.
+- **Atualização** só grava colunas permitidas; campos relacionais/calculados são descartados.
+- Fuso de referência dos testes: **America/Sao_Paulo (UTC-3)**.
+
+## Arquivos alterados (21)
 
 ```
 backend/src/controllers/eventController.js
@@ -148,6 +163,10 @@ backend/src/utils/pdf.js
 backend/src/utils/date.js
 frontend/src/api/client.js
 frontend/src/api/services.js
+frontend/src/utils/format.js
+frontend/src/pages/EventDetail.jsx
+frontend/src/pages/participant/MinhaArea.jsx
+frontend/src/pages/admin/AdminDashboard.jsx
 frontend/src/pages/admin/AdminEventoForm.jsx
 frontend/src/pages/admin/AdminAtividades.jsx
 frontend/src/pages/admin/AdminOperador.jsx

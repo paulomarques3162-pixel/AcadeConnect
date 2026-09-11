@@ -76,10 +76,12 @@ export const registerForEvent = asyncHandler(async (req, res) => {
   }
 
   // Generate unique registration code.
-  let code = generateRegistrationCode(event.startDate.getFullYear());
+  // Use the UTC year: event dates are calendar days stored as UTC-midnight, so
+  // getFullYear() could return the previous year on 31/12 in UTC-3.
+  let code = generateRegistrationCode(event.startDate.getUTCFullYear());
   for (let i = 0; i < 6; i += 1) {
     if (!(await prisma.registration.findUnique({ where: { code } }))) break;
-    code = generateRegistrationCode(event.startDate.getFullYear());
+    code = generateRegistrationCode(event.startDate.getUTCFullYear());
   }
   const qrToken = generateQrToken();
 

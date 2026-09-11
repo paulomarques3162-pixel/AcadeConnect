@@ -12,7 +12,7 @@ import { useApi } from '../../hooks/useApi';
 import { useAuth } from '../../context/AuthContext';
 import { DashboardCard } from '../../components/Cards';
 import { Spinner, ErrorState, Card } from '../../components/ui';
-import { formatNumber } from '../../utils/format';
+import { formatNumber, calendarDayKey } from '../../utils/format';
 
 const PIE_COLORS = ['#166534', '#d4af37', '#15803d', '#b8942b', '#22c55e', '#0f766e'];
 
@@ -28,10 +28,10 @@ function ChartCard({ title, children }) {
 const WEEK_LABELS = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira'];
 
 function formatTime(dateStr, startTime) {
-  if (startTime) return startTime;
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  // The event time is its own field (startTime). Never derive a time from the
+  // calendar date — doing so leaked the UTC offset (a UTC-midnight date showed
+  // as 21:00 in UTC-3).
+  return startTime || '';
 }
 
 function currentWeekDays() {
@@ -55,16 +55,16 @@ export default function AdminDashboard() {
   const { data: allEvents } = useApi(() => eventApi.list({ limit: 200 }).then((r) => r.data.events), []);
 
   const weekDays = currentWeekDays();
-  const weekStart = weekDays[0];
-  const weekEnd = new Date(weekDays[4]);
-  weekEnd.setDate(weekEnd.getDate() + 1);
-  const weekEvents = (allEvents || []).filter((e) => e.startDate && new Date(e.startDate) >= weekStart && new Date(e.startDate) < weekEnd);
+  // Compare CALENDAR DAYS, not instants. `startDate` is a calendar day stored
+  // as UTC-midnight, so comparing with local Date boundaries placed the event
+  // on the previous weekday in UTC-3 (or dropped it from the week).
+  const dayKeys = weekDays.map((d) => calendarDayKey(d));
+  const weekEvents = (allEvents || []).filter((e) => e.startDate && dayKeys.includes(calendarDayKey(e.startDate)));
   const weekByDay = weekDays.map((day, i) => {
-    const next = new Date(day);
-    next.setDate(day.getDate() + 1);
+    const key = dayKeys[i];
     const list = weekEvents
-      .filter((e) => new Date(e.startDate) >= day && new Date(e.startDate) < next)
-      .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+      .filter((e) => calendarDayKey(e.startDate) === key)
+      .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
     return { label: WEEK_LABELS[i], date: day, events: list };
   });
 

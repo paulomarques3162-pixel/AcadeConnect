@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Button, Spinner, ErrorState, StatusBadge, Checkbox, SmartImage } from '../components/ui';
 import { QRCodeCard } from '../components/Cards';
-import { formatDate, formatNumber, ACTIVITY_TYPE_LABELS, MODALITY_LABELS, fullNameInitials } from '../utils/format';
+import { formatDate, formatNumber, ACTIVITY_TYPE_LABELS, MODALITY_LABELS, fullNameInitials, calendarDayKey } from '../utils/format';
 
 export default function EventDetail() {
   const { idOrSlug } = useParams();
@@ -22,7 +22,10 @@ export default function EventDetail() {
   const event = data;
 
   const grouped = (event?.activities || []).reduce((acc, a) => {
-    const key = new Date(a.date).toDateString();
+    // Group by CALENDAR DAY (UTC day for UTC-midnight dates). Using
+    // new Date(a.date).toDateString() grouped by the local day and could split
+    // or merge days differently from the date actually displayed.
+    const key = calendarDayKey(a.date);
     (acc[key] = acc[key] || []).push(a);
     return acc;
   }, {});

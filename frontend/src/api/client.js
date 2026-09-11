@@ -1,0 +1,40 @@
+import axios from 'axios';
+
+// Vite proxies /api and /uploads to the backend in dev.
+// Set VITE_API_URL to override (e.g. when frontend and backend are deployed separately).
+const baseURL = import.meta.env.VITE_API_URL || '/api';
+
+export const api = axios.create({ baseURL, withCredentials: true });
+
+// Attach JWT token from localStorage to every request.
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('acadeconnect_token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// On 401, clear auth and redirect to login (unless already there).
+api.interceptors.response.use(
+  (res) => res,
+  (error) => {
+    if (error.response?.status === 401 && !window.location.pathname.startsWith('/login')) {
+      localStorage.removeItem('acadeconnect_token');
+      localStorage.removeItem('acadeconnect_user');
+      if (!window.location.pathname.startsWith('/cadastro')) {
+        // Avoid full reload loops on public pages; delegate to auth state.
+        window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+/** Normalize backend response envelopes into { data, meta, message }. */
+export function unwrap(response) {
+  return response.data;
+}
+
+/** Extract a friendly error message from an API error. */
+export function getErrorMessage(error, fallback = 'Algo deu errado. Tente novamente.') {
+  return error?.response?.data?.message || error?.message || fallback;
+}

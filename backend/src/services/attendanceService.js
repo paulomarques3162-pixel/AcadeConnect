@@ -1,5 +1,7 @@
 import { prisma } from '../config/prisma.js';
+import { env } from '../config/env.js';
 import { ApiError } from '../utils/apiError.js';
+import { isActivityFinished } from '../utils/date.js';
 import { createAuditLog } from './auditLogService.js';
 import { createNotification } from './notificationService.js';
 
@@ -231,16 +233,10 @@ export async function setManualAttendance({ registrationId, activityId, present,
 }
 
 function isFinished(activity) {
-  // `activity.date` is stored as UTC-midnight of the scheduled calendar day
-  // (the frontend sends a date-only string; the controller stores `new Date(date)`).
-  // Rebuild the end instant on that same calendar day (UTC components) applying the
-  // endTime as local wall-clock time, then compare with the current local time.
-  // This is timezone-independent: a same-day/future activity is NOT wrongly treated
-  // as finished when the server runs in a non-UTC timezone (e.g. America/Sao_Paulo,
-  // where calling setHours() on the UTC-midnight Date would shift the end to the
-  // previous day).
-  const d = new Date(activity.date);
-  const [h, m] = String(activity.endTime || '23:59').split(':').map(Number);
-  const end = new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), h, m, 0, 0);
-  return new Date() > end;
+  // `activity.date` is the scheduled calendar day (UTC-midnight) and `endTime`
+  // is a wall-clock time in the EVENT's timezone (default America/Sao_Paulo).
+  // The end instant is computed in that timezone — not in the server's — so an
+  // activity 08:00-15:00 in Brazil is not treated as finished early when the
+  // server runs in UTC (Render).
+  return isActivityFinished(activity.date, activity.endTime, { timeZone: env.eventTimezone });
 }

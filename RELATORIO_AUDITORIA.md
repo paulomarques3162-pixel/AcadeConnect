@@ -29,6 +29,7 @@ Foram reproduzidos em execução real (não apenas por leitura de código):
 | 15 | **Crítica** | **QR Code exibido codificava a IMAGEM, não o token.** `QRCodeCard` usava `react-qr-code` com o **data URL PNG** devolvido pelo backend. O QR lido pela câmera continha `data:image/png;base64,...` em vez do token `AC...` → a validação falhava sempre. | `QRCodeCard value={qrCode}` (data URL) |
 | 16 | **Alta** | **Código manual não funcionava.** O endpoint de scan só aceitava o `qrToken` (que o participante não conhece). Digitar o código da inscrição (`EVT-2026-000123`) retornava 404. | `POST /attendance/scan { code }` → 404 |
 | 17 | **Alta** | **QR e código manual trafegavam no mesmo campo.** A câmera enviava o valor lido como `code`; dependendo da resolução, o token não era encontrado → "QR Code ou código de inscrição inválido". Faltava separação explícita de origem (e do `method`). | câmera enviava `{ code: "AC..." }` |
+| 18 | **Crítica** | **Atividade OPEN era dada como encerrada por causa do fuso do SERVIDOR.** `isFinished()` montava o fim da atividade com o fuso local do servidor (Render = UTC). Uma atividade 08:00–15:00 no Brasil era tratada como terminando às 15:00 **UTC** (12:00 local) → 409 "Atividade encerrada" a partir do meio-dia. | Produção: 11/09 08:00-15:00, agora 17:32Z (14:32 SP) → 409 indevido |
 
 ---
 
@@ -166,6 +167,18 @@ Resultado: **29/29 verificações PASS** (incluindo o fuso brasileiro).
 - **Duplicidade**: verificação + constraint única `@@unique([registrationId, activityId])`; 409 com `details.recordedAt`/`method`. Concorrência: 1 registro.
 - **Prova real do QR**: o QR gerado foi decodificado com um leitor real (`jsqr`) e o conteúdo é exatamente o `qrToken` — não data URL/base64/URL/JSON.
 
+## 11.0 Correção crítica de fuso na presença (isFinished)
+
+**Causa:** `isFinished()` em `attendanceService.js` fazia `new Date(getUTCFullYear, getUTCMonth, getUTCDate, h, m)` — ou seja, o horário de término era interpretado no **fuso local do servidor**. Em produção (Render) o servidor roda em **UTC**, então uma atividade 08:00–15:00 do Brasil terminava às 15:00Z = **12:00 local**, bloqueando presença à tarde.
+
+**Correção:** o término agora é calculado no **fuso do evento** (`EVENT_TIMEZONE`, padrão `America/Sao_Paulo`) via `Intl.DateTimeFormat` — sem `-03:00` fixo, respeitando a base de fusos do sistema (inclui horário de verão se um dia voltar).
+- `backend/src/utils/date.js`: `getTimeZoneOffsetMs()`, `zonedDateTimeToUtc()`, `isActivityFinished()`.
+- `backend/src/config/env.js`: `EVENT_TIMEZONE` (padrão `America/Sao_Paulo`); `.env.example` documenta.
+- `attendanceService.isFinished()` usa `isActivityFinished(activity.date, activity.endTime, { timeZone: env.eventTimezone })`.
+- Regra: `now >= fim` → encerrada. Ex.: 14:59 SP = permitido; 15:00 SP = encerrada. `CANCELLED`/`FINISHED` continuam bloqueando.
+
+**Produção (antes):** 11/09 08:00–15:00, servidor 17:32Z (14:32 SP) → **409**. **Local com servidor em TZ=UTC (simulando Render), após a correção:** manual **201**, QR **201/QR_CODE**, duplicidade **409**, atividade de ontem → **409 encerrada**.
+
 ## 11. Verificação em PRODUÇÃO (Render) — resultado real
 
 Testei o backend de produção `https://acadeconnect-backend.onrender.com/api` com uma inscrição real criada e removida ao final (limpeza confirmada):
@@ -214,6 +227,10 @@ backend/src/services/certificateService.js
 backend/src/utils/pdf.js
 backend/src/utils/date.js
 backend/src/validations/schemas.js
+backend/src/config/env.js
+backend/.env.example
+backend/scripts/test-qr-manual.mjs
+backend/scripts/test-timezone.mjs
 frontend/src/api/client.js
 frontend/src/api/services.js
 frontend/src/utils/format.js

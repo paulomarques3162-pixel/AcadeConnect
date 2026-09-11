@@ -43,6 +43,10 @@ export const env = {
   },
   emailEnabled: parseBool(process.env.EMAIL_ENABLED, false),
 
+  // Fuso de referência dos EVENTOS/ATIVIDADES (horários de parede). O servidor
+  // pode estar em UTC; o fim da atividade é calculado neste fuso.
+  eventTimezone: process.env.EVENT_TIMEZONE || 'America/Sao_Paulo',
+
   demoAdminEmail: process.env.DEMO_ADMIN_EMAIL || 'admin@demo.com',
   demoAdminPassword: process.env.DEMO_ADMIN_PASSWORD || 'Admin@12345',
   demoParticipantEmail: process.env.DEMO_PARTICIPANT_EMAIL || 'participante@demo.com',

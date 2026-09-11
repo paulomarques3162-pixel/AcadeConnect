@@ -21,8 +21,26 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('acadeconnect_user');
       localStorage.removeItem('acadeconnect_token');
     };
+    // Um 403 significa que o papel real (no banco) é menor do que o papel
+    // guardado em localStorage. Revalidamos a sessão para que a interface
+    // reflita o papel verdadeiro em vez de mostrar telas que a API recusa.
+    const onForbidden = () => {
+      authApi
+        .me()
+        .then((res) => {
+          setUser(res.data.user);
+          localStorage.setItem('acadeconnect_user', JSON.stringify(res.data.user));
+        })
+        .catch(() => {
+          /* 401 já é tratado acima */
+        });
+    };
     window.addEventListener('auth:unauthorized', onUnauthorized);
-    return () => window.removeEventListener('auth:unauthorized', onUnauthorized);
+    window.addEventListener('auth:forbidden', onForbidden);
+    return () => {
+      window.removeEventListener('auth:unauthorized', onUnauthorized);
+      window.removeEventListener('auth:forbidden', onForbidden);
+    };
   }, []);
 
   // Restore session on load.

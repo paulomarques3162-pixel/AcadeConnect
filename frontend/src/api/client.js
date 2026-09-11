@@ -25,6 +25,13 @@ api.interceptors.response.use(
         window.dispatchEvent(new CustomEvent('auth:unauthorized'));
       }
     }
+    // 403: o backend recusou por papel insuficiente (ADMIN/ORGANIZER).
+    // Isso normalmente indica que o papel guardado no navegador está
+    // desatualizado em relação ao banco. Avisamos a aplicação para
+    // revalidar a sessão em /auth/me — sem afrouxar a proteção da API.
+    if (error.response?.status === 403) {
+      window.dispatchEvent(new CustomEvent('auth:forbidden'));
+    }
     return Promise.reject(error);
   }
 );

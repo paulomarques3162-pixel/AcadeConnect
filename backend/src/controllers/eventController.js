@@ -5,6 +5,7 @@ import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { publicUrl } from '../config/multer.js';
 import { slugify, generateRegistrationCode } from '../utils/codes.js';
+import { parseDate } from '../utils/date.js';
 import { createAuditLog } from '../services/auditLogService.js';
 import { autoIssueCertificatesForEvent } from '../services/certificateService.js';
 
@@ -143,16 +144,16 @@ export const createEvent = asyncHandler(async (req, res) => {
       shortDescription: body.shortDescription || null,
       description: body.description || null,
       bannerUrl: banner,
-      startDate: new Date(body.startDate),
-      endDate: new Date(body.endDate),
+      startDate: parseDate(body.startDate),
+      endDate: parseDate(body.endDate),
       startTime: body.startTime || null,
       location: body.location || null,
       address: body.address || null,
       modality: body.modality || 'PRESENCIAL',
       category: body.category || null,
       capacity: body.capacity ? Number(body.capacity) : null,
-      registrationStart: body.registrationStart ? new Date(body.registrationStart) : new Date(),
-      registrationEnd: body.registrationEnd ? new Date(body.registrationEnd) : null,
+      registrationStart: body.registrationStart ? parseDate(body.registrationStart) : new Date(),
+      registrationEnd: body.registrationEnd ? parseDate(body.registrationEnd, { endOfDay: true }) : null,
       status: body.status || 'DRAFT',
       allowRegistration: body.allowRegistration ?? true,
       allowCancellation: body.allowCancellation ?? true,
@@ -186,10 +187,10 @@ export const updateEvent = asyncHandler(async (req, res) => {
   delete data._count;
 
   if (banner) data.bannerUrl = banner;
-  if (data.startDate) data.startDate = new Date(data.startDate);
-  if (data.endDate) data.endDate = new Date(data.endDate);
-  if (data.registrationStart) data.registrationStart = new Date(data.registrationStart);
-  if (data.registrationEnd) data.registrationEnd = new Date(data.registrationEnd);
+  if (data.startDate) data.startDate = parseDate(data.startDate);
+  if (data.endDate) data.endDate = parseDate(data.endDate);
+  if (data.registrationStart) data.registrationStart = parseDate(data.registrationStart);
+  if (data.registrationEnd) data.registrationEnd = parseDate(data.registrationEnd, { endOfDay: true });
   if (data.capacity !== undefined) data.capacity = data.capacity ? Number(data.capacity) : null;
   if (data.minimumAttendancePercentage !== undefined) data.minimumAttendancePercentage = Number(data.minimumAttendancePercentage);
   if (data.certificateHours !== undefined) data.certificateHours = Number(data.certificateHours);

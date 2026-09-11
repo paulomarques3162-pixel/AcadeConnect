@@ -41,7 +41,24 @@ export default function EventDetail() {
       setConfirmation(res.data);
       toast.success('Inscrição realizada com sucesso!');
     } catch (e) {
-      toast.error(e?.response?.data?.message || 'Não foi possível concluir a inscrição.');
+      const status = e?.response?.status;
+      const message = e?.response?.data?.message || 'Não foi possível concluir a inscrição.';
+      // 409 "Você já está inscrito neste evento": em vez de repetir o erro,
+      // levamos o participante para a inscrição que ele já possui.
+      if (status === 409 && /já está inscrito/i.test(message)) {
+        try {
+          const mine = await registrationApi.mine();
+          const existing = (mine.data.registrations || []).find((r) => r.eventId === event.id);
+          if (existing) {
+            toast.info ? toast.info(message) : toast.error(message);
+            navigate(`/inscricao/${existing.id}`);
+            return;
+          }
+        } catch {
+          /* mantém a mensagem original abaixo */
+        }
+      }
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }

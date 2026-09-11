@@ -1,15 +1,40 @@
+// Datas "somente data" (Activity.date, Event.startDate/endDate) são gravadas
+// no banco como meia-noite UTC. Formatá-las com o fuso local (UTC-3) exibia o
+// dia anterior. Detectamos esse caso e formatamos em UTC, sem mexer em
+// timestamps reais (createdAt, etc.), que continuam em horário local.
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const UTC_MIDNIGHT_RE = /^\d{4}-\d{2}-\d{2}T00:00:00(\.000)?Z$/;
+
+function isDateOnly(value) {
+  if (value instanceof Date) return false;
+  const s = String(value);
+  return DATE_ONLY_RE.test(s) || UTC_MIDNIGHT_RE.test(s);
+}
+
 export function formatDate(value, opts = {}) {
   if (!value) return '—';
-  const d = new Date(value);
+  const dateOnly = isDateOnly(value);
+  const d = new Date(dateOnly && DATE_ONLY_RE.test(String(value)) ? `${value}T00:00:00Z` : value);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('pt-BR', opts);
+  return d.toLocaleDateString('pt-BR', dateOnly ? { timeZone: 'UTC', ...opts } : opts);
 }
 
 export function formatDateTime(value) {
   if (!value) return '—';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '—';
+  if (isDateOnly(value)) return d.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
   return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+/** Converte um valor vindo da API para o formato do <input type="date">. */
+export function toDateInputValue(value) {
+  if (!value) return '';
+  const s = String(value);
+  if (DATE_ONLY_RE.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
 }
 
 export function formatNumber(n) {

@@ -32,7 +32,12 @@ export const register = asyncHandler(async (req, res) => {
   if (existing) throw new ApiError(409, 'Já existe uma conta com este e-mail.');
 
   const passwordHash = await bcrypt.hash(password, 12);
-  const finalRole = role === 'ORGANIZER' ? 'ORGANIZER' : 'PARTICIPANT'; // participants cannot self-register as admin
+  // Segurança: o auto-cadastro NUNCA define papel privilegiado. Antes, enviar
+  // { role: 'ORGANIZER' } no corpo da requisição criava uma conta com acesso ao
+  // painel administrativo (escalação de privilégio). ADMIN/ORGANIZER só podem
+  // ser atribuídos por um ADMIN em /api/admin/users.
+  void role;
+  const finalRole = 'PARTICIPANT';
 
   const user = await prisma.user.create({
     data: {

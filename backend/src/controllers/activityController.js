@@ -4,6 +4,7 @@ import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { publicUrl } from '../config/multer.js';
 import { slugify } from '../utils/codes.js';
+import { parseDate } from '../utils/date.js';
 import { createAuditLog } from '../services/auditLogService.js';
 
 const include = {
@@ -48,7 +49,7 @@ export const createActivity = asyncHandler(async (req, res) => {
       slug: slugify(body.name),
       description: body.description || null,
       type: body.type || 'OUTRO',
-      date: new Date(body.date),
+      date: parseDate(body.date),
       startTime: body.startTime,
       endTime: body.endTime,
       location: body.location || null,
@@ -86,7 +87,7 @@ export const updateActivity = asyncHandler(async (req, res) => {
     if (body[f] !== undefined) data[f] = body[f];
   }
   if (image) data.imageUrl = image;
-  if (data.date) data.date = new Date(data.date);
+  if (data.date) data.date = parseDate(data.date);
   if (data.capacity !== undefined) data.capacity = data.capacity ? Number(data.capacity) : null;
   if (data.speakerId === '') data.speakerId = null;
 

@@ -21,15 +21,19 @@ export async function findRegistrationByScan({ qrToken, code } = {}) {
     if (/^data:image\//i.test(token)) {
       throw new ApiError(422, 'Este QR Code é antigo e não pode ser validado. Peça ao participante para abrir novamente a inscrição e exibir um novo QR Code.');
     }
-    return prisma.registration.findUnique({ where: { qrToken: token }, include });
+    const byToken = await prisma.registration.findUnique({ where: { qrToken: token }, include });
+    if (!byToken) throw new ApiError(404, 'QR Code inválido.');
+    return byToken;
   }
 
   const humanCode = String(code ?? '').trim().toUpperCase();
   if (humanCode) {
-    return prisma.registration.findUnique({ where: { code: humanCode }, include });
+    const byCode = await prisma.registration.findUnique({ where: { code: humanCode }, include });
+    if (!byCode) throw new ApiError(404, 'Inscrição não encontrada para este código.');
+    return byCode;
   }
 
-  return null;
+  throw new ApiError(400, 'QR Code ou código de inscrição não informado.');
 }
 
 /**

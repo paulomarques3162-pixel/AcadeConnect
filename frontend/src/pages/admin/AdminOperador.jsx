@@ -74,14 +74,22 @@ export default function AdminOperador() {
   const handleCode = async (value, source = 'qr') => {
     setError(null);
     setResult(null);
+    const v = String(value ?? '').trim();
+    // Debug (não expõe o token inteiro): ajuda a diagnosticar em produção.
+    // eslint-disable-next-line no-console
+    console.debug('[QR DEBUG] valor lido:', `${v.slice(0, 6)}...`, '| tamanho:', v.length, '| formato:', /^AC[0-9a-f]{20,}$/i.test(v) ? 'qrToken' : (source === 'manual' ? 'manual' : 'desconhecido'), '| activityId:', activityId || '(vazio)');
     try {
       // Explicit origin: camera = qrToken, manual = code. Never mixed.
       const res = source === 'manual'
-        ? await attendanceApi.scanManual(value, activityId)
-        : await attendanceApi.scanQr(value, activityId);
+        ? await attendanceApi.scanManual(v, activityId)
+        : await attendanceApi.scanQr(v, activityId);
+      // eslint-disable-next-line no-console
+      console.debug('[QR DEBUG] enviando', source === 'manual' ? '{ code, activityId }' : '{ qrToken, activityId }', '| resposta:', res?.message);
       setResult({ ok: true, ...res.data });
       toast.success('Presença registrada com sucesso!');
     } catch (e) {
+      // eslint-disable-next-line no-console
+      console.debug('[QR DEBUG] resposta do backend:', e?.response?.status, e?.response?.data?.message);
       setResult({ ok: false });
       setError(e?.response?.data?.message || 'QR Code inválido.');
     }

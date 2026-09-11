@@ -129,14 +129,21 @@ export const attendanceSchemas = {
     body: Joi.object({
       qrToken: Joi.string().trim().max(200).allow('', null),
       code: Joi.string().trim().max(120).allow('', null),
-      activityId: Joi.string().required(),
-    }).or('qrToken', 'code'),
+      activityId: Joi.string().required().messages({
+        'any.required': 'Atividade não informada.',
+        'string.empty': 'Atividade não informada.',
+      }),
+    })
+      .or('qrToken', 'code')
+      .messages({ 'object.missing': 'QR Code não recebido.' }),
   },
   validate: {
     body: Joi.object({
       qrToken: Joi.string().trim().max(200).allow('', null),
       code: Joi.string().trim().max(120).allow('', null),
-    }).or('qrToken', 'code'),
+    })
+      .or('qrToken', 'code')
+      .messages({ 'object.missing': 'QR Code não recebido.' }),
   },
   manual: {
     body: Joi.object({

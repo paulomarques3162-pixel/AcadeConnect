@@ -166,7 +166,40 @@ Resultado: **29/29 verificações PASS** (incluindo o fuso brasileiro).
 - **Duplicidade**: verificação + constraint única `@@unique([registrationId, activityId])`; 409 com `details.recordedAt`/`method`. Concorrência: 1 registro.
 - **Prova real do QR**: o QR gerado foi decodificado com um leitor real (`jsqr`) e o conteúdo é exatamente o `qrToken` — não data URL/base64/URL/JSON.
 
-## Arquivos alterados (24)
+## 11. Verificação em PRODUÇÃO (Render) — resultado real
+
+Testei o backend de produção `https://acadeconnect-backend.onrender.com/api` com uma inscrição real criada e removida ao final (limpeza confirmada):
+
+- Login admin (conta demo documentada) → OK
+- Inscrição criada devolve `qrToken` (`AC…`) e `GET` devolve o **mesmo** token
+- `POST /attendance/scan { qrToken, activityId }` → **201**, `method=QR_CODE`
+- Repetido → **409** “Presença já registrada”, com `details.recordedAt`
+- QR legado (`data:image/...`) → **422** “Este QR Code é antigo…”
+- `POST /attendance/scan { code }` → **201**, `method=MANUAL`
+- CORS para `https://acade-connect.vercel.app` → **ok** (`access-control-allow-origin`)
+- Bundle da Vercel contém `scanQr`/`scanManual` e `VITE_API_URL=https://acadeconnect-backend.onrender.com/api`
+
+**Produção: 12/12 PASS.** Conclusão: o código e o deploy estão corretos. Se ainda aparecer “QR Code … inválido”, é **QR antigo (que codificava a imagem) ou cache de navegador**: fazer *hard refresh* (Ctrl+Shift+R / limpar cache da Vercel) e reabrir a inscrição para gerar um **novo QR** com o token.
+
+### Mensagens de erro diferenciadas (para diagnóstico)
+
+| Situação | HTTP | Mensagem |
+|---|---|---|
+| qrToken/code ausente | 400 | “QR Code ou código de inscrição não informado.” |
+| activityId ausente | 422 | “Atividade não informada.” |
+| QR inexistente | 404 | “QR Code inválido.” |
+| Código inexistente | 404 | “Inscrição não encontrada para este código.” |
+| Inscrição não confirmada/cancelada | 409 | “Inscrição cancelada/pendente…” |
+| Atividade inexistente | 404 | “Atividade não encontrada.” |
+| Atividade de outro evento | 409 | “Esta atividade não pertence ao evento da inscrição.” |
+| Atividade cancelada | 409 | “Atividade cancelada.” |
+| Atividade encerrada | 409 | “Atividade encerrada…” |
+| Presença duplicada | 409 | “Presença já registrada para esta atividade.” (+ `recordedAt`/`method`) |
+| QR legado (data URL) | 422 | “Este QR Code é antigo…” |
+
+**Logs de debug** (sem expor o token inteiro): frontend emite `[QR DEBUG]` no console; backend emite `[QR DEBUG]` quando `QR_DEBUG=true` estiver no ambiente.
+
+## Arquivos alterados (24 + teste `backend/scripts/test-qr-manual.mjs`)
 
 ```
 backend/src/controllers/eventController.js

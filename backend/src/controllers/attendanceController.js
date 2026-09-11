@@ -14,14 +14,39 @@ export const registerByQr = asyncHandler(async (req, res) => {
   // Camera sends the QR token; manual entry sends the registration code. The
   // method reflects which one was used (both are validated by the backend).
   const usedToken = Boolean(String(qrToken || '').trim());
-  const result = await registerAttendanceByQr({
-    qrToken,
-    code,
-    activityId,
-    operatorId: req.user.id,
-    method: usedToken ? 'QR_CODE' : 'MANUAL',
-  });
-  return apiResponse(res, { status: 201, message: 'Presença registrada com sucesso!', data: result });
+  const debug = process.env.QR_DEBUG === 'true';
+  if (debug) {
+    const raw = usedToken ? String(qrToken) : String(code || '');
+    // eslint-disable-next-line no-console
+    console.log('[QR DEBUG] scan recebido:', {
+      source: usedToken ? 'qrToken' : (code ? 'code' : 'none'),
+      length: raw.trim().length,
+      preview: `${raw.trim().slice(0, 6)}...`,
+      format: /^AC[0-9a-f]{20,}$/i.test(raw.trim()) ? 'qrToken' : (usedToken ? 'desconhecido' : 'code'),
+      hasActivityId: Boolean(activityId),
+      activityId: activityId || null,
+    });
+  }
+  try {
+    const result = await registerAttendanceByQr({
+      qrToken,
+      code,
+      activityId,
+      operatorId: req.user.id,
+      method: usedToken ? 'QR_CODE' : 'MANUAL',
+    });
+    if (debug) {
+      // eslint-disable-next-line no-console
+      console.log('[QR DEBUG] sucesso:', { attendanceId: result?.attendance?.id, participant: result?.participant?.name });
+    }
+    return apiResponse(res, { status: 201, message: 'Presença registrada com sucesso!', data: result });
+  } catch (err) {
+    if (debug) {
+      // eslint-disable-next-line no-console
+      console.log('[QR DEBUG] erro:', { status: err.statusCode, message: err.message });
+    }
+    throw err;
+  }
 });
 
 /** Validate a QR token / registration code without recording (confirmation screen). */

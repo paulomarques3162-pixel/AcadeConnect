@@ -68,9 +68,12 @@ export function QRCodeCard({ value, label }) {
   // never feed the data URL into the QR encoder, or the QR would contain the
   // base64 image instead of the token and scanning would fail.
   const isImage = typeof value === 'string' && value.startsWith('data:image');
+  const hasValue = typeof value === 'string' && value.trim().length > 0;
   return (
     <div className="qr-card">
-      {isImage ? <img src={value} alt={label || 'QR Code'} width={220} height={220} /> : <QRCode value={value} size={220} />}
+      {hasValue && (isImage
+        ? <img src={value} alt={label || 'QR Code'} width={220} height={220} />
+        : <QRCode value={value} size={220} />)}
       {label && <p>{label}</p>}
     </div>
   );

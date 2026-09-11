@@ -63,7 +63,8 @@ export default function AdminTelao() {
 
   const handleScan = async (code) => {
     try {
-      const res = await attendanceApi.scan(code.trim(), activityId);
+      // Camera reads a QR -> always send qrToken (never the manual `code` field).
+      const res = await attendanceApi.scanQr(code.trim(), activityId);
       setResult(res.data);
       setName(res.data.participant?.name);
       setError(null);

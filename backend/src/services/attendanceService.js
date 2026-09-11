@@ -5,24 +5,31 @@ import { createNotification } from './notificationService.js';
 
 /**
  * Resolve a registration from a scanned QR token OR a manually typed code.
- * The backend is the single authority: it normalizes the entry, tries the
- * opaque QR token first (case-sensitive) and then the human code (uppercased).
- * It never trusts the browser.
+ * The two inputs are explicit and are NEVER mixed:
+ *   - qrToken -> exact, case-sensitive lookup on Registration.qrToken (camera)
+ *   - code    -> normalized (trim + UPPERCASE) lookup on Registration.code (manual)
+ * The backend is the single authority and never trusts the browser.
  */
 export async function findRegistrationByScan({ qrToken, code } = {}) {
-  // The value may arrive in either field (camera token or manual code), so we
-  // normalize both and try: exact QR token (case-sensitive) then human code
-  // (uppercased). This makes the backend the single authority regardless of
-  // which input the frontend used.
-  const raw = String(qrToken || code || '').trim();
-  if (!raw) return null;
   const include = { event: true, user: true, activityRegistrations: true };
+  const token = String(qrToken ?? '').trim();
 
-  const byToken = await prisma.registration.findUnique({ where: { qrToken: raw }, include });
-  if (byToken) return byToken;
+  if (token) {
+    // Legacy QR codes (older builds) encoded the PNG data URL instead of the
+    // token. That content cannot be turned back into a token, so reject it
+    // explicitly with a clear message — never accept arbitrary content.
+    if (/^data:image\//i.test(token)) {
+      throw new ApiError(422, 'Este QR Code é antigo e não pode ser validado. Peça ao participante para abrir novamente a inscrição e exibir um novo QR Code.');
+    }
+    return prisma.registration.findUnique({ where: { qrToken: token }, include });
+  }
 
-  const byCode = await prisma.registration.findUnique({ where: { code: raw.toUpperCase() }, include });
-  return byCode;
+  const humanCode = String(code ?? '').trim().toUpperCase();
+  if (humanCode) {
+    return prisma.registration.findUnique({ where: { code: humanCode }, include });
+  }
+
+  return null;
 }
 
 /**
@@ -43,10 +50,6 @@ export async function registerAttendanceByQr({ qrToken, code, activityId, operat
 
   const registration = await findRegistrationByScan({ qrToken, code });
   if (!registration) throw new ApiError(404, 'QR Code ou código de inscrição inválido.');
-
-  // Record whether the entry came from the QR token or the manual code.
-  const rawEntry = String(qrToken || code || '').trim();
-  const method2 = rawEntry && rawEntry === registration.qrToken ? 'QR_CODE' : 'MANUAL';
   if (registration.status !== 'CONFIRMED') {
     throw new ApiError(409, `Inscrição ${registration.status === 'CANCELLED' ? 'cancelada' : 'pendente'}. Entre em contato com a organização.`);
   }
@@ -103,13 +106,13 @@ export async function registerAttendanceByQr({ qrToken, code, activityId, operat
       userId: registration.userId,
       eventId: registration.eventId,
       status: 'PRESENT',
-      method: method2,
+      method,
       recordedAt: new Date(),
       operatorId,
     },
     update: {
       status: 'PRESENT',
-      method: method2,
+      method,
       recordedAt: new Date(),
       operatorId,
     },

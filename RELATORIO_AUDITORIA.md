@@ -28,6 +28,7 @@ Foram reproduzidos em execução real (não apenas por leitura de código):
 | 14 | **Média** | **Comparação de datas por INSTANTE em vez de DIA DE CALENDÁRIO.** No calendário do dashboard e em “Próxima atividade”, um evento de segunda (gravado como meia-noite UTC) caía no **domingo** em UTC-3, e uma atividade de **hoje** não aparecia como próxima. No detalhe do evento, as atividades eram agrupadas pelo dia local, podendo separar/juntar dias diferente do exibido. | `new Date(startDate) >= weekStart` (local) deslocava o dia |
 | 15 | **Crítica** | **QR Code exibido codificava a IMAGEM, não o token.** `QRCodeCard` usava `react-qr-code` com o **data URL PNG** devolvido pelo backend. O QR lido pela câmera continha `data:image/png;base64,...` em vez do token `AC...` → a validação falhava sempre. | `QRCodeCard value={qrCode}` (data URL) |
 | 16 | **Alta** | **Código manual não funcionava.** O endpoint de scan só aceitava o `qrToken` (que o participante não conhece). Digitar o código da inscrição (`EVT-2026-000123`) retornava 404. | `POST /attendance/scan { code }` → 404 |
+| 17 | **Alta** | **QR e código manual trafegavam no mesmo campo.** A câmera enviava o valor lido como `code`; dependendo da resolução, o token não era encontrado → "QR Code ou código de inscrição inválido". Faltava separação explícita de origem (e do `method`). | câmera enviava `{ code: "AC..." }` |
 
 ---
 
@@ -156,11 +157,14 @@ Resultado: **29/29 verificações PASS** (incluindo o fuso brasileiro).
 
 ## 10. QR Code e código manual (correção crítica)
 
-- **QR Code**: gerado a partir de `Registration.qrToken` (opaco, `AC` + 48 hex, persistido e determinístico). O frontend codifica o **token**; o data URL do servidor deixou de ser realimentado no encoder. O QR continua válido após reload, logout/login (o token está no banco).
-- **Código manual**: o operador pode digitar o código da inscrição (`EVT-2026-000123`). O backend normaliza (trim + maiúsculas), tenta primeiro o token e depois o código, e rejeita códigos vazios/inválidos.
-- **Validação no evento correto**: `activity.eventId !== registration.eventId` → 409 (não é possível usar código de um evento em outro).
-- **Duplicidade**: verificação + constraint única `@@unique([registrationId, activityId])`; resposta 409 com `details.recordedAt`. Concorrência testada (duas chamadas simultâneas → 1 registro).
-- **Segurança**: rotas de scan/validate exigem ADMIN/ORGANIZER (401 sem login, 403 para participante); nada sensível no QR.
+- **QR Code (câmera)**: `attendanceApi.scanQr(decodedText, activityId)` envia **somente** `{ qrToken }`. O QR é gerado a partir de `Registration.qrToken` (opaco `AC…`, persistido e determinístico).
+- **Código manual**: `attendanceApi.scanManual(code, activityId)` envia **somente** `{ code }` (ex.: `EVT-2026-000123`).
+- **Backend — sem mistura**: `findRegistrationByScan()` só usa `qrToken` (exato, case-sensitive) **ou** `code` (trim + UPPERCASE). Nunca procura token no campo de código, nem código no campo de token. Ausente → 400; não encontrado → 404.
+- **Método explícito**: definido pela origem (`qrToken` → `QR_CODE`; `code` → `MANUAL`), não por comparação frágil de strings.
+- **QR legado**: se o conteúdo decodificado for um `data:image/...` (QR antigo que codificava a imagem), retorna **422** com mensagem clara pedindo novo QR — não aceita conteúdo arbitrário.
+- **Validação no evento correto**: `activity.eventId !== registration.eventId` → 409.
+- **Duplicidade**: verificação + constraint única `@@unique([registrationId, activityId])`; 409 com `details.recordedAt`/`method`. Concorrência: 1 registro.
+- **Prova real do QR**: o QR gerado foi decodificado com um leitor real (`jsqr`) e o conteúdo é exatamente o `qrToken` — não data URL/base64/URL/JSON.
 
 ## Arquivos alterados (24)
 

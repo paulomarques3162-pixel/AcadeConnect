@@ -84,11 +84,19 @@ export const registrationApi = {
 };
 
 // ---- Attendance ----
-// `value` pode ser o token do QR (câmera) ou o código da inscrição (manual,
-// ex.: EVT-2026-000123). O backend normaliza e resolve (token primeiro, depois código).
+// A origem da entrada é explícita: câmera envia `qrToken`; digitação manual
+// envia `code` (ex.: EVT-2026-000123). O backend NUNCA mistura os dois campos.
+const isQrToken = (value) => /^AC[0-9a-f]{20,}$/i.test(String(value ?? '').trim());
 export const attendanceApi = {
-  scan: (value, activityId) => api.post('/attendance/scan', { code: value, activityId }).then(unwrap),
-  validateQr: (value) => api.post('/attendance/validate', { code: value }).then(unwrap),
+  scanQr: (qrToken, activityId) => api.post('/attendance/scan', { qrToken: String(qrToken).trim(), activityId }).then(unwrap),
+  scanManual: (code, activityId) => api.post('/attendance/scan', { code: String(code).trim(), activityId }).then(unwrap),
+  // compat: escolhe o campo pelo formato (token vs código humano)
+  scan: (value, activityId) => (isQrToken(value)
+    ? api.post('/attendance/scan', { qrToken: String(value).trim(), activityId }).then(unwrap)
+    : api.post('/attendance/scan', { code: String(value).trim(), activityId }).then(unwrap)),
+  validateQr: (value) => (isQrToken(value)
+    ? api.post('/attendance/validate', { qrToken: String(value).trim() }).then(unwrap)
+    : api.post('/attendance/validate', { code: String(value).trim() }).then(unwrap)),
   manual: (registrationId, activityId, present) => api.post('/attendance/manual', { registrationId, activityId, present }).then(unwrap),
   activityRows: (activityId, params) => api.get(`/attendance/activity/${activityId}`, { params }).then(unwrap),
   summary: (eventId) => api.get(`/attendance/summary/${eventId}`).then(unwrap),

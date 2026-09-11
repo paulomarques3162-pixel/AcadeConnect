@@ -73,7 +73,7 @@ export default function InscricaoDetail() {
 
   if (loading) return <Spinner text="Carregando inscrição..." />;
   if (error || !data) return <ErrorState title="Inscrição não encontrada." onRetry={reload} />;
-  const { registration, qrCode } = data;
+  const { registration } = data;
   const enrolledIds = new Set((registration.activityRegistrations || []).map((ar) => ar.activityId));
   const canManageActivities = registration.status === 'CONFIRMED' && registration.event?.allowRegistration !== false;
   const availableActivities = (eventActivities.data || []).filter((a) => !enrolledIds.has(a.id) && a.allowsRegistration);
@@ -173,7 +173,7 @@ export default function InscricaoDetail() {
         <div style={{ textAlign: 'center' }}>
           <p className="text-muted mb-2">Apresente este QR Code na entrada das atividades para registrar presença.</p>
           {/* Encode the raw opaque token so scanners send the token (not the PNG data URL). */}
-          <QRCodeCard value={registration.qrToken || qrCode} label={`Inscrição #${registration.code}`} />
+          <QRCodeCard value={registration.qrToken} label={`Inscrição #${registration.code}`} />
         </div>
       </Modal>
     </>

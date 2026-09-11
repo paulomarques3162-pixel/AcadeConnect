@@ -55,7 +55,7 @@ export default function AdminOperador() {
           processingRef.current = true;
           await stopScanner();
           setScanning(false);
-          try { await handleCode(decodedText); } finally { processingRef.current = false; }
+          try { await handleCode(decodedText, 'qr'); } finally { processingRef.current = false; }
         },
         () => { /* decode errors ignored */ }
       );
@@ -71,11 +71,14 @@ export default function AdminOperador() {
     }
   };
 
-  const handleCode = async (code) => {
+  const handleCode = async (value, source = 'qr') => {
     setError(null);
     setResult(null);
     try {
-      const res = await attendanceApi.scan(code.trim(), activityId);
+      // Explicit origin: camera = qrToken, manual = code. Never mixed.
+      const res = source === 'manual'
+        ? await attendanceApi.scanManual(value, activityId)
+        : await attendanceApi.scanQr(value, activityId);
       setResult({ ok: true, ...res.data });
       toast.success('Presença registrada com sucesso!');
     } catch (e) {
@@ -86,7 +89,7 @@ export default function AdminOperador() {
 
   const handleManualSubmit = (e) => {
     e.preventDefault();
-    if (manualCode.trim()) handleCode(manualCode.trim());
+    if (manualCode.trim()) handleCode(manualCode.trim(), 'manual');
   };
 
   const searchParticipant = async () => {

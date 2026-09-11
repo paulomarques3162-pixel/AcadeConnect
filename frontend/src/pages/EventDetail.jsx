@@ -157,7 +157,7 @@ export default function EventDetail() {
                     <CheckCircle2 size={40} color="var(--success)" />
                     <strong>Inscrição realizada com sucesso!</strong>
                     <span>Inscrição #{confirmation.registration.code}</span>
-                    <QRCodeCard value={confirmation.registration?.qrToken || confirmation.qrCode} label="Apresente este QR Code no evento" />
+                    <QRCodeCard value={confirmation.registration?.qrToken} label="Apresente este QR Code no evento" />
                     <Link className="btn btn--primary btn--block" to={`/inscricao/${confirmation.registration.id}`}>Ver minha inscrição</Link>
                   </div>
                 ) : canRegister ? (

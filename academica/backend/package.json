@@ -1,0 +1,47 @@
+{
+  "name": "acadeconnect-backend",
+  "version": "1.0.0",
+  "description": "AcadeConnect - Backend API for academic events management (Node.js + Express + Prisma + PostgreSQL)",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "dev": "nodemon --watch src --exec node src/server.js",
+    "start": "node src/server.js",
+    "build": "echo 'Backend has no build step; run start or dev'",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:seed": "prisma db seed",
+    "prisma:studio": "prisma studio",
+    "prisma:push": "prisma db push",
+    "check:role": "node scripts/check-user-role.js",
+    "set:role": "node scripts/set-user-role.js"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.19.1",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "exceljs": "^4.4.0",
+    "helmet": "^7.1.0",
+    "joi": "^17.13.3",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.1",
+    "nodemailer": "^6.9.14",
+    "pdfkit": "^0.15.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4",
+    "prisma": "^5.19.1"
+  }
+}

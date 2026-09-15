@@ -8,8 +8,11 @@ import { generateQrDataUrl } from '../utils/qr.js';
 import { createAuditLog } from '../services/auditLogService.js';
 import { createNotification } from '../services/notificationService.js';
 import { sendEmail, emailTemplates } from '../services/emailService.js';
+import { createPayment } from '../services/paymentService.js';
 
 const registrationInclude = {
+  // O dono da inscrição (para a tela de detalhe não depender do usuário logado).
+  user: { select: { id: true, name: true, email: true, course: true } },
   event: {
     include: {
       institution: { select: { id: true, name: true } },
@@ -19,6 +22,7 @@ const registrationInclude = {
   activityRegistrations: { include: { activity: { include: { speaker: true } } } },
   attendance: { include: { activity: true } },
   certificates: true,
+  payment: { select: { id: true, code: true, status: true, amountCents: true, pixPayload: true, txid: true, paidAt: true } },
 };
 
 export const registerForEvent = asyncHandler(async (req, res) => {
@@ -113,12 +117,58 @@ export const registerForEvent = asyncHandler(async (req, res) => {
   }
   await createAuditLog({ userId, action: 'REGISTRATION_CREATED', resource: 'Registration', resourceId: registration.id, ip: req.ip });
 
+  // Evento pago: gera o PIX imediatamente. O QR de entrada só passa a valer
+  // quando o pagamento for confirmado pelo administrador.
+  let payment = null;
+  let paymentWarning = null;
+  if (event.isPaid) {
+    try {
+      payment = await createPayment({
+        userId,
+        eventId,
+        registrationId: registration.id,
+        amountCents: event.priceCents,
+        description: `Inscrição ${code}`,
+      });
+    } catch (e) {
+      paymentWarning = e?.message || 'Não foi possível gerar o PIX agora.';
+    }
+  }
+
   const qrCode = await generateQrDataUrl(qrToken);
   return apiResponse(res, {
     status: 201,
-    message: 'Inscrição realizada com sucesso!',
-    data: { registration, qrCode },
+    message: event.isPaid
+      ? 'Inscrição realizada! Efetue o pagamento PIX para liberar o QR Code de entrada.'
+      : 'Inscrição realizada com sucesso!',
+    data: { registration, qrCode, payment, paymentWarning, requiresPayment: !!event.isPaid },
   });
+});
+
+/**
+ * Gera (ou reaproveita) o PIX de uma inscrição existente em evento pago.
+ * Usado quando a chave PIX ainda não existia no momento da inscrição.
+ */
+export const generatePayment = asyncHandler(async (req, res) => {
+  const registration = await prisma.registration.findUnique({
+    where: { id: req.params.id },
+    include: { event: true, payment: true },
+  });
+  if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
+  const isStaff = ['ADMIN', 'ORGANIZER'].includes(req.user.role);
+  if (registration.userId !== req.user.id && !isStaff) throw new ApiError(403, 'Sem permissão.');
+  if (!registration.event.isPaid) throw new ApiError(409, 'Este evento é gratuito — não há pagamento.');
+  if (registration.status !== 'CONFIRMED') throw new ApiError(409, 'Inscrição não está ativa.');
+  if (registration.payment && registration.payment.status === 'PAID') throw new ApiError(409, 'Pagamento já confirmado.');
+
+  const payment = await createPayment({
+    userId: registration.userId,
+    eventId: registration.eventId,
+    registrationId: registration.id,
+    amountCents: registration.event.priceCents,
+    description: `Inscrição ${registration.code}`,
+  });
+  return apiResponse(res, { status: 201, message: 'PIX gerado.', data: { payment } });
 });
 
 export const getMyRegistrations = asyncHandler(async (req, res) => {
@@ -210,6 +260,38 @@ export const registerForActivity = asyncHandler(async (req, res) => {
   });
   await createNotification({ userId: req.user.id, type: 'REGISTRATION', title: 'Inscrição em atividade', message: `Inscrito na atividade "${activity.name}".`, link: `/inscricao/${id}` });
   return apiResponse(res, { status: 201, message: 'Inscrito na atividade com sucesso.', data: { activityId } });
+});
+
+/**
+ * Controle administrativo do QR de entrada: regenerar, invalidar ou reativar.
+ * Toda ação é auditada.
+ */
+export const adminSetQr = asyncHandler(async (req, res) => {
+  const { action } = req.body;
+  const registration = await prisma.registration.findUnique({ where: { id: req.params.id } });
+  if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
+
+  const data = {};
+  if (action === 'regenerate') {
+    data.qrToken = generateQrToken();
+    data.qrActive = true;
+  } else if (action === 'invalidate') {
+    data.qrActive = false;
+  } else if (action === 'reactivate') {
+    data.qrActive = true;
+  } else {
+    throw new ApiError(422, 'Ação de QR inválida.');
+  }
+
+  const updated = await prisma.registration.update({ where: { id: registration.id }, data, include: registrationInclude });
+  await createAuditLog({
+    userId: req.user.id,
+    action: `REGISTRATION_QR_${action.toUpperCase()}`,
+    resource: 'Registration',
+    resourceId: registration.id,
+    ip: req.ip,
+  });
+  return apiResponse(res, { message: 'QR Code atualizado.', data: { registration: updated } });
 });
 
 export const unregisterFromActivity = asyncHandler(async (req, res) => {

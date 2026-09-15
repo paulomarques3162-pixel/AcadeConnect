@@ -32,6 +32,20 @@ export function generateCertificateCode(year = new Date().getFullYear()) {
 }
 
 /**
+ * Payment code: PAY-2026-000123
+ */
+export function generatePaymentCode(year = new Date().getFullYear()) {
+  return `PAY-${year}-${randomDigits(6)}`;
+}
+
+/**
+ * Order code: ORD-2026-000123
+ */
+export function generateOrderCode(year = new Date().getFullYear()) {
+  return `ORD-${year}-${randomDigits(6)}`;
+}
+
+/**
  * Slugify a string: "Semana Acadêmica 2026" -> "semana-academica-2026"
  */
 export function slugify(input) {

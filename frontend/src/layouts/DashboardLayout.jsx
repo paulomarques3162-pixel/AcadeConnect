@@ -1,5 +1,5 @@
 import { Outlet, Link, NavLink } from 'react-router-dom';
-import { CalendarCheck, Ticket, FileText, User, LogOut, Home } from 'lucide-react';
+import { CalendarCheck, Ticket, FileText, User, LogOut, Home, ShoppingBag, Package, CreditCard, MessagesSquare, Tag } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Logo } from '../components/Logo';
@@ -10,6 +10,11 @@ const LINKS = [
   { to: '/minha-area', label: 'Minha área', icon: Home },
   { to: '/minhas-inscricoes', label: 'Minhas inscrições', icon: Ticket },
   { to: '/certificados', label: 'Certificados', icon: FileText },
+  { to: '/loja', label: 'Loja', icon: ShoppingBag },
+  { to: '/cupons', label: 'Cupons', icon: Tag },
+  { to: '/meus-pedidos', label: 'Meus pedidos', icon: Package },
+  { to: '/meus-pagamentos', label: 'Pagamentos', icon: CreditCard },
+  { to: '/comunicacao', label: 'Comunicação', icon: MessagesSquare },
   { to: '/perfil', label: 'Perfil', icon: User },
 ];
 

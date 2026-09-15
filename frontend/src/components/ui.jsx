@@ -72,6 +72,8 @@ const STATUS_TONE = {
   DRAFT: 'neutral', PUBLISHED: 'info', OPEN: 'success', ONGOING: 'info', CLOSED: 'neutral', CANCELLED: 'danger',
   PENDING: 'warning', CONFIRMED: 'success', PRESENT: 'success', ABSENT: 'danger',
   AVAILABLE: 'success', ISSUED: 'success', SCHEDULED: 'info', FULL: 'warning', FINISHED: 'neutral',
+  PAID: 'success', EXPIRED: 'danger', REFUNDED: 'neutral',
+  ACTIVE: 'success', INACTIVE: 'neutral', RESOLVED: 'neutral',
 };
 export function StatusBadge({ status, label, tone }) {
   const t = tone || STATUS_TONE[status] || 'neutral';

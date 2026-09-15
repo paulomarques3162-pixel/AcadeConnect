@@ -135,6 +135,73 @@ export async function buildCertificatePdf(opts) {
   return Buffer.concat(chunks);
 }
 
+function brl(cents) {
+  return `R$ ${(Number(cents || 0) / 100).toFixed(2).replace('.', ',')}`;
+}
+
+/**
+ * Comprovante do pedido (NÃO é boleto): resumo com itens, desconto, total, PIX
+ * e QR de PIX quando houver. Reutiliza o PDFKit já usado nos certificados.
+ */
+export async function buildOrderReceiptPdf({ order, user, payment = null }) {
+  const doc = new PDFDocument({
+    size: 'A4',
+    margins: { top: 60, bottom: 60, left: 60, right: 60 },
+    info: { Title: `Comprovante ${order.code}`, Author: 'Mustangs Atlética Anhanguera' },
+  });
+  const chunks = [];
+  doc.on('data', (c) => chunks.push(c));
+  const done = new Promise((resolve) => doc.on('end', resolve));
+
+  doc.save().lineWidth(3).strokeColor('#14532d').rect(30, 30, doc.page.width - 60, doc.page.height - 60).stroke();
+
+  doc.font('Helvetica-Bold').fontSize(22).fillColor('#14532d').text('COMPROVANTE DE PEDIDO', { align: 'center' });
+  doc.moveDown(0.6);
+  doc.font('Helvetica').fontSize(12).fillColor('#374151');
+  doc.text(`Pedido: ${order.code}`);
+  doc.text(`Cliente: ${user?.name || '-'}  (${user?.email || '-'})`);
+  doc.text(`Data: ${new Date(order.createdAt).toLocaleString('pt-BR')}`);
+  doc.text(`Status: ${order.status}`);
+  doc.moveDown(0.8);
+
+  doc.font('Helvetica-Bold').fontSize(13).text('Itens');
+  doc.moveDown(0.3);
+  doc.font('Helvetica').fontSize(11);
+  for (const it of order.items || []) {
+    doc.text(`${it.quantity}x ${it.productName} — ${brl(it.unitPriceCents)} un. — subtotal ${brl(it.subtotalCents)}`);
+  }
+
+  doc.moveDown(0.8);
+  doc.text(`Subtotal: ${brl(order.subtotalCents)}`);
+  doc.text(`Desconto: ${order.discountCents ? `- ${brl(order.discountCents)}` : brl(0)}${order.couponCode ? ` (cupom ${order.couponCode})` : ''}`);
+  doc.font('Helvetica-Bold').fillColor('#14532d').text(`Total: ${brl(order.totalCents)}`);
+  doc.font('Helvetica').fillColor('#374151');
+
+  doc.moveDown(0.8);
+  doc.font('Helvetica-Bold').text('Pagamento');
+  doc.font('Helvetica').fontSize(11);
+  doc.text(`Método: PIX`);
+  doc.text(`Status: ${payment?.status || 'PENDENTE'}`);
+  if (payment?.pixPayload) {
+    doc.moveDown(0.3);
+    doc.fontSize(9).fillColor('#6b7280').text('PIX Copia e Cola:', { continued: false });
+    doc.fontSize(8).fillColor('#111827').text(payment.pixPayload, { width: doc.page.width - 160 });
+    try {
+      const { generateQrDataUrl } = await import('./qr.js');
+      const qrDataUrl = await generateQrDataUrl(payment.pixPayload);
+      const qrBase64 = qrDataUrl.replace(/^data:image\/png;base64,/, '');
+      const imgWidth = 120;
+      doc.image(Buffer.from(qrBase64, 'base64'), (doc.page.width - imgWidth) / 2, doc.y + 10, { width: imgWidth });
+    } catch {
+      /* QR opcional */
+    }
+  }
+
+  doc.end();
+  await done;
+  return Buffer.concat(chunks);
+}
+
 function formatDate(value) {
   // Event/activity dates are stored as UTC-midnight of the chosen calendar day.
   // Using local getters (UTC-3) rendered the previous day on the certificate.

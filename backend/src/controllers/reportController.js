@@ -49,15 +49,21 @@ export const reports = asyncHandler(async (req, res) => {
   const totalPresentes = presentRegs.length;
   const totalAusentes = Math.max(0, totalInscritos - totalPresentes);
 
-  const participantesPorAtividade = await prisma.activityRegistration.groupBy({
-    by: ['activityId'],
-    where: activityId ? { activityId } : undefined,
-    _count: { _all: true },
-  });
+  // Buscamos primeiro as atividades no escopo do filtro (evento/atividade) e só
+  // depois contamos as inscrições. Antes o groupBy ignorava o eventId e somava
+  // atividades de outros eventos no gráfico.
   const activities = await prisma.activity.findMany({
     where: activityId ? { id: activityId } : (eventId ? { eventId } : undefined),
     select: { id: true, name: true },
   });
+  const scopedActivityIds = activities.map((a) => a.id);
+  const participantesPorAtividade = scopedActivityIds.length
+    ? await prisma.activityRegistration.groupBy({
+        by: ['activityId'],
+        where: { activityId: { in: scopedActivityIds } },
+        _count: { _all: true },
+      })
+    : [];
   const actMap = Object.fromEntries(activities.map((a) => [a.id, a.name]));
 
   const totalAtividadesParticipadas = registrations.reduce((acc, r) => acc + r._count.attendance, 0);

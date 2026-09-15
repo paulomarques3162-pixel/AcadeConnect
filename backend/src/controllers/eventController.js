@@ -44,6 +44,26 @@ function toNumberOrNull(value) {
   return Number(value);
 }
 
+/**
+ * Valida os campos de evento pago (valores em centavos). Nunca confia no
+ * frontend: garante valor > 0 e dentro da faixa min/max configurada.
+ */
+function validateEventPayment({ isPaid, priceCents, minPriceCents, maxPriceCents }) {
+  if (!isPaid) return;
+  if (priceCents === null || priceCents === undefined || Number.isNaN(priceCents) || priceCents <= 0) {
+    throw new ApiError(422, 'Informe um valor de inscrição maior que zero para evento pago.');
+  }
+  if (minPriceCents !== null && minPriceCents !== undefined && priceCents < minPriceCents) {
+    throw new ApiError(422, 'O valor do evento não pode ser menor que o valor mínimo.');
+  }
+  if (maxPriceCents !== null && maxPriceCents !== undefined && priceCents > maxPriceCents) {
+    throw new ApiError(422, 'O valor do evento não pode ser maior que o valor máximo.');
+  }
+  if (minPriceCents !== null && minPriceCents !== undefined && maxPriceCents !== null && maxPriceCents !== undefined && minPriceCents > maxPriceCents) {
+    throw new ApiError(422, 'O valor mínimo não pode ser maior que o valor máximo.');
+  }
+}
+
 export const listEvents = asyncHandler(async (req, res) => {
   const {
     page = 1,
@@ -69,8 +89,15 @@ export const listEvents = asyncHandler(async (req, res) => {
   if (modality) where.modality = modality;
   if (status) where.status = status;
   if (location) where.location = { contains: location, mode: 'insensitive' };
-  if (date === 'upcoming') where.startDate = { gte: new Date() };
-  if (date === 'past') where.endDate = { lt: new Date() };
+  // Datas de evento são dias de calendário gravados à meia-noite UTC. Comparar
+  // com o instante atual excluía o evento DE HOJE de "upcoming". Comparamos com
+  // o início do dia UTC: hoje entra em upcoming e sai de past.
+  if (date === 'upcoming' || date === 'past') {
+    const now = new Date();
+    const startOfTodayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    if (date === 'upcoming') where.startDate = { gte: startOfTodayUtc };
+    if (date === 'past') where.endDate = { lt: startOfTodayUtc };
+  }
 
   const orderBy =
     sort === 'closest'
@@ -150,6 +177,13 @@ export const createEvent = asyncHandler(async (req, res) => {
 
   const organizerId = req.user.role === 'ADMIN' ? body.organizerId || req.user.id : req.user.id;
 
+  // Evento pago (opcional) — validado no backend.
+  const isPaid = body.isPaid === true || body.isPaid === 'true';
+  const priceCents = toNumberOrNull(body.priceCents) ?? null;
+  const minPriceCents = toNumberOrNull(body.minPriceCents) ?? null;
+  const maxPriceCents = toNumberOrNull(body.maxPriceCents) ?? null;
+  validateEventPayment({ isPaid, priceCents, minPriceCents, maxPriceCents });
+
   const event = await prisma.event.create({
     data: {
       name: body.name,
@@ -175,6 +209,10 @@ export const createEvent = asyncHandler(async (req, res) => {
       automaticCertificate: body.automaticCertificate ?? false,
       minimumAttendancePercentage: Number(body.minimumAttendancePercentage ?? 75),
       certificateHours: Number(body.certificateHours ?? 8),
+      isPaid,
+      priceCents,
+      minPriceCents,
+      maxPriceCents,
       institutionId: body.institutionId || null,
       organizerId,
     },
@@ -201,9 +239,16 @@ export const updateEvent = asyncHandler(async (req, res) => {
   // exactly why event edits (dates, times, text) were not persisted before.
   const data = {};
 
-  const textFields = ['name', 'shortDescription', 'description', 'startTime', 'location', 'address', 'modality', 'category', 'status'];
-  for (const f of textFields) {
+  // Campos opcionais podem vir vazios do formulário -> gravamos null.
+  const nullableTextFields = ['shortDescription', 'description', 'startTime', 'location', 'address', 'category'];
+  for (const f of nullableTextFields) {
     if (body[f] !== undefined) data[f] = body[f] === '' ? null : body[f];
+  }
+  // Campos obrigatórios (name/modality/status) nunca podem virar null: se o
+  // valor chegar vazio, mantemos o atual em vez de descartar todo o save com 422.
+  const requiredTextFields = ['name', 'modality', 'status'];
+  for (const f of requiredTextFields) {
+    if (body[f] !== undefined && body[f] !== '') data[f] = body[f];
   }
 
   if (body.startDate !== undefined) {
@@ -235,6 +280,18 @@ export const updateEvent = asyncHandler(async (req, res) => {
   // Only an ADMIN may reassign the organizer; organizers keep ownership of their events.
   if (body.organizerId !== undefined && req.user.role === 'ADMIN') data.organizerId = body.organizerId || null;
   if (banner) data.bannerUrl = banner;
+
+  // Evento pago — valida com os valores finais (enviados ou já persistidos).
+  if (body.isPaid !== undefined) data.isPaid = toBool(body.isPaid);
+  if (body.priceCents !== undefined) data.priceCents = toNumberOrNull(body.priceCents);
+  if (body.minPriceCents !== undefined) data.minPriceCents = toNumberOrNull(body.minPriceCents);
+  if (body.maxPriceCents !== undefined) data.maxPriceCents = toNumberOrNull(body.maxPriceCents);
+  validateEventPayment({
+    isPaid: data.isPaid !== undefined ? data.isPaid : existing.isPaid,
+    priceCents: data.priceCents !== undefined ? data.priceCents : existing.priceCents,
+    minPriceCents: data.minPriceCents !== undefined ? data.minPriceCents : existing.minPriceCents,
+    maxPriceCents: data.maxPriceCents !== undefined ? data.maxPriceCents : existing.maxPriceCents,
+  });
 
   // Regenerate the slug from the (possibly new) name, keeping it unique.
   if (data.name && data.name !== existing.name) {

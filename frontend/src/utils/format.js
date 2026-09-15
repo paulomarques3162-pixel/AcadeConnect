@@ -94,6 +94,12 @@ const STATUS_LABELS = {
   SCHEDULED: 'Agendada',
   FULL: 'Lotada',
   FINISHED: 'Concluída',
+  PAID: 'Pago',
+  EXPIRED: 'Expirado',
+  REFUNDED: 'Estornado',
+  ACTIVE: 'Ativo',
+  INACTIVE: 'Inativo',
+  RESOLVED: 'Resolvida',
 };
 
 export function statusLabel(status) {

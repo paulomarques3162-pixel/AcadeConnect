@@ -1,30 +1,9 @@
-```jsx
 import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard,
-  CalendarDays,
-  ListChecks,
-  Users,
-  Ticket,
-  ClipboardCheck,
-  Award,
-  BarChart3,
-  UserCog,
-  Settings,
-  LogOut,
-  ScanLine,
-  Menu,
-  X,
-  Moon,
-  Sun,
-  Dices,
-  CreditCard,
-  QrCode,
-  ShoppingBag,
-  TicketPercent,
-  Package,
-  MessageSquare,
+  LayoutDashboard, CalendarDays, ListChecks, Users, Ticket, ClipboardCheck,
+  Award, BarChart3, UserCog, Settings, LogOut, ScanLine, Menu, X, Moon, Sun,
+  Trophy, CreditCard, QrCode, Package, Tag, ShoppingBag, MessagesSquare,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -39,18 +18,16 @@ const MENU = [
   { to: '/admin/presencas', label: 'Presenças', icon: ClipboardCheck },
   { to: '/admin/operador', label: 'Controle de presença', icon: ScanLine },
   { to: '/admin/certificados', label: 'Certificados', icon: Award },
+  { to: '/admin/sorteios', label: 'Sorteios', icon: Trophy },
+  { to: '/admin/pagamentos', label: 'Pagamentos', icon: CreditCard },
+  { to: '/admin/pix', label: 'PIX', icon: QrCode },
+  { to: '/admin/produtos', label: 'Produtos', icon: Package },
+  { to: '/admin/cupons', label: 'Cupons', icon: Tag },
+  { to: '/admin/pedidos', label: 'Pedidos', icon: ShoppingBag },
+  { to: '/admin/comunicacao', label: 'Comunicação', icon: MessagesSquare },
   { to: '/admin/relatorios', label: 'Relatórios', icon: BarChart3 },
   { to: '/admin/usuarios', label: 'Usuários', icon: UserCog },
   { to: '/admin/configuracoes', label: 'Configurações', icon: Settings },
-
-  // V6
-  { to: '/admin/sorteios', label: 'Sorteios', icon: Dices },
-  { to: '/admin/pagamentos', label: 'Pagamentos', icon: CreditCard },
-  { to: '/admin/pix', label: 'PIX', icon: QrCode },
-  { to: '/admin/produtos', label: 'Produtos', icon: ShoppingBag },
-  { to: '/admin/cupons', label: 'Cupons', icon: TicketPercent },
-  { to: '/admin/pedidos', label: 'Pedidos', icon: Package },
-  { to: '/admin/comunicacao', label: 'Comunicação', icon: MessageSquare },
 ];
 
 export function AdminLayout() {
@@ -66,10 +43,7 @@ export function AdminLayout() {
 
   const SidebarInner = (
     <>
-      <div className="admin-sidebar__head">
-        <Logo light />
-      </div>
-
+      <div className="admin-sidebar__head"><Logo light /></div>
       <nav className="admin-sidebar__nav">
         {MENU.map((m) => (
           <NavLink
@@ -77,76 +51,38 @@ export function AdminLayout() {
             to={m.to}
             end={m.end}
             onClick={() => setOpen(false)}
-            className={({ isActive }) =>
-              `admin-link ${isActive ? 'is-active' : ''}`
-            }
+            className={({ isActive }) => (isActive ? 'admin-link is-active' : 'admin-link')}
           >
             <m.icon size={19} /> {m.label}
           </NavLink>
         ))}
       </nav>
-
       <div className="admin-sidebar__foot">
-        <button className="admin-link" onClick={handleLogout}>
-          <LogOut size={19} /> Sair
-        </button>
+        <button className="admin-link" onClick={handleLogout}><LogOut size={19} /> Sair</button>
       </div>
     </>
   );
 
   return (
     <div className="admin-shell">
-      <aside className="admin-sidebar admin-sidebar--desktop">
-        {SidebarInner}
-      </aside>
-
+      <aside className="admin-sidebar admin-sidebar--desktop">{SidebarInner}</aside>
       {open && (
-        <div
-          className="admin-drawer-backdrop"
-          onClick={() => setOpen(false)}
-        >
-          <aside
-            className="admin-sidebar"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {SidebarInner}
-          </aside>
+        <div className="admin-drawer-backdrop" onClick={() => setOpen(false)}>
+          <aside className="admin-sidebar" onClick={(e) => e.stopPropagation()}>{SidebarInner}</aside>
         </div>
       )}
 
       <div className="admin-main">
         <div className="admin-topbar">
-          <button
-            className="icon-btn admin-topbar__burger"
-            onClick={() => setOpen(true)}
-            aria-label="Abrir menu"
-          >
-            <Menu size={22} />
-          </button>
-
-          <span className="admin-topbar__title">
-            Painel Administrativo
-          </span>
-
+          <button className="icon-btn admin-topbar__burger" onClick={() => setOpen(true)} aria-label="Abrir menu"><Menu size={22} /></button>
+          <span className="admin-topbar__title">Painel Administrativo</span>
           <div className="admin-topbar__right">
-            <button
-              className="icon-btn"
-              onClick={toggleTheme}
-              aria-label="Alternar tema"
-            >
-              {theme === 'light' ? (
-                <Moon size={20} />
-              ) : (
-                <Sun size={20} />
-              )}
+            <button className="icon-btn" onClick={toggleTheme} aria-label="Alternar tema">
+              {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
             </button>
-
-            <span className="admin-topbar__user">
-              {user?.name}
-            </span>
+            <span className="admin-topbar__user">{user?.name}</span>
           </div>
         </div>
-
         <main className="admin-content">
           <Outlet />
         </main>
@@ -154,4 +90,3 @@ export function AdminLayout() {
     </div>
   );
 }
-```

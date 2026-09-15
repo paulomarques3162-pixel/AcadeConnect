@@ -8,6 +8,7 @@ import { signToken } from '../utils/jwt.js';
 import { createAuditLog } from '../services/auditLogService.js';
 import { createNotification } from '../services/notificationService.js';
 import { sendEmail, emailTemplates } from '../services/emailService.js';
+import { publicUrl } from '../config/multer.js';
 
 const publicUserSelect = {
   id: true, name: true, email: true, role: true, phone: true,
@@ -69,6 +70,9 @@ export const register = asyncHandler(async (req, res) => {
   setAuthCookie(res, token);
   await createAuditLog({ userId: user.id, action: 'USER_REGISTERED', resource: 'User', resourceId: user.id });
 
+  // O avatar é gravado como nome de arquivo; devolvemos a URL pública completa
+  // para o frontend não montar um caminho relativo quebrado.
+  user.avatarUrl = publicUrl(user.avatarUrl);
   return apiResponse(res, { status: 201, message: 'Conta criada com sucesso.', data: { token, user } });
 });
 
@@ -93,7 +97,7 @@ export const login = asyncHandler(async (req, res) => {
     message: 'Login realizado com sucesso.',
     data: {
       token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, avatarUrl: user.avatarUrl },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, avatarUrl: publicUrl(user.avatarUrl) },
     },
   });
 });
@@ -108,6 +112,7 @@ export const logout = asyncHandler(async (req, res) => {
 
 export const me = asyncHandler(async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: publicUserSelect });
+  if (user?.avatarUrl) user.avatarUrl = publicUrl(user.avatarUrl);
   return apiResponse(res, { message: 'Dados do usuário.', data: { user } });
 });
 
@@ -119,7 +124,9 @@ export const forgotPassword = asyncHandler(async (req, res) => {
     return apiResponse(res, { message: 'Se o e-mail existir, enviaremos um link de recuperação.' });
   }
   const token = signToken({ sub: user.id, purpose: 'reset', type: 'password_reset' });
-  const resetUrl = `${env.appUrl}/recuperar-senha?token=${token}`;
+  // A rota do formulário de nova senha é /recuperar-senha/token (App.jsx).
+  // O link antigo (/recuperar-senha?token=...) abria a tela de "esqueci a senha".
+  const resetUrl = `${env.appUrl}/recuperar-senha/token?token=${token}`;
   if (env.emailEnabled) {
     const tpl = emailTemplates.resetPassword(user.name, resetUrl);
     await sendEmail({ to: user.email, ...tpl });

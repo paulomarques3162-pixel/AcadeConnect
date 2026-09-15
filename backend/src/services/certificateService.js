@@ -215,27 +215,52 @@ export async function autoIssueCertificatesForEvent(eventId) {
   if (!event || !event.automaticCertificate) return { issued: 0 };
 
   const requiredActivities = event.activities.filter((a) => a.requiresAttendance && a.generatesCertificate);
+  const requiredIds = new Set(requiredActivities.map((a) => a.id));
+  const eligibleRegs = event.registrations.filter((r) => r.status === 'CONFIRMED');
+  if (eligibleRegs.length === 0 || requiredIds.size === 0) return { issued: 0 };
+
+  const regIds = eligibleRegs.map((r) => r.id);
+
+  // Uma única rodada de consultas em lote (antes eram 3 por inscrição — N+1).
+  const [activityRegs, attendances, existingCerts] = await Promise.all([
+    // Só as inscrições em atividades que exigem presença e geram certificado.
+    prisma.activityRegistration.findMany({
+      where: { registrationId: { in: regIds }, activityId: { in: [...requiredIds] } },
+      select: { registrationId: true, activityId: true },
+    }),
+    prisma.attendance.findMany({
+      where: { registrationId: { in: regIds }, activityId: { in: [...requiredIds] } },
+      select: { registrationId: true, status: true },
+    }),
+    prisma.certificate.findMany({
+      where: { registrationId: { in: regIds }, activityId: null },
+      select: { registrationId: true },
+    }),
+  ]);
+
+  // reqCount = atividades exigidas em que o participante está inscrito
+  // present  = presenças registradas nessas mesmas atividades
+  // (mesma fórmula/regra de antes, apenas calculada em memória)
+  const reqCountByReg = new Map();
+  for (const ar of activityRegs) {
+    reqCountByReg.set(ar.registrationId, (reqCountByReg.get(ar.registrationId) || 0) + 1);
+  }
+  const presentByReg = new Map();
+  for (const at of attendances) {
+    if (at.status !== 'PRESENT') continue;
+    presentByReg.set(at.registrationId, (presentByReg.get(at.registrationId) || 0) + 1);
+  }
+  const hasCert = new Set(existingCerts.map((c) => c.registrationId));
+
   let issued = 0;
-
-  for (const reg of event.registrations) {
-    if (reg.status !== 'CONFIRMED') continue;
-    const requiredIds = new Set(requiredActivities.map((a) => a.id));
-    // Only count activities the participant is registered for and that require attendance.
-    const ar = await prisma.activityRegistration.findMany({ where: { registrationId: reg.id } });
-    const reqCount = ar.filter((x) => requiredIds.has(x.activityId)).length;
+  for (const reg of eligibleRegs) {
+    const reqCount = reqCountByReg.get(reg.id) || 0;
     if (reqCount === 0) continue;
-
-    const attendance = await prisma.attendance.findMany({
-      where: { registrationId: reg.id, activityId: { in: [...requiredIds] } },
-    });
-    const present = attendance.filter((a) => a.status === 'PRESENT').length;
+    const present = presentByReg.get(reg.id) || 0;
     const percentage = Math.round((present / reqCount) * 100);
-    if (percentage >= event.minimumAttendancePercentage) {
-      const has = await prisma.certificate.findFirst({ where: { registrationId: reg.id, activityId: null } });
-      if (!has) {
-        await issueEventCertificate(reg.id);
-        issued += 1;
-      }
+    if (percentage >= event.minimumAttendancePercentage && !hasCert.has(reg.id)) {
+      await issueEventCertificate(reg.id);
+      issued += 1;
     }
   }
   return { issued };

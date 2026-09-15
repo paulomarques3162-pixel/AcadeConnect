@@ -90,6 +90,42 @@ enum NotificationType {
   REMINDER
 }
 
+enum PaymentStatus {
+  PENDING
+  PAID
+  EXPIRED
+  CANCELLED
+  REFUNDED
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CouponType {
+  PERCENT
+  FIXED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  CANCELLED
+  EXPIRED
+}
+
+enum RaffleStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+enum ConversationStatus {
+  OPEN
+  RESOLVED
+}
+
 // ============================================================
 // MODELS
 // ============================================================
@@ -134,6 +170,15 @@ model User {
   notifications       Notification[]
   audits              AuditLog[]
   organizedEvents     Event[]           @relation("EventOrganizer")
+  payments            Payment[]         @relation("PaymentUser")
+  paymentsConfirmed   Payment[]         @relation("PaymentConfirmer")
+  orders              Order[]
+  conversations       Conversation[]    @relation("ConversationUser")
+  assignedConversations Conversation[]  @relation("ConversationAssignee")
+  messagesSent        Message[]         @relation("MessageSender")
+  rafflesCreated      Raffle[]          @relation("RaffleCreator")
+  raffleWins          RaffleWinner[]    @relation("RaffleWinnerUser")
+  rafflesDrawn        RaffleWinner[]    @relation("RaffleDrawer")
 
   @@index([email])
   @@index([role])
@@ -164,6 +209,10 @@ model Event {
   automaticCertificate Boolean @default(false)
   minimumAttendancePercentage Float  @default(75)
   certificateHours Float        @default(8)
+  isPaid           Boolean    @default(false)
+  priceCents       Int?
+  minPriceCents    Int?
+  maxPriceCents    Int?
   institutionId    String?
   organizerId      String?
   deletedAt        DateTime?
@@ -176,6 +225,9 @@ model Event {
   registrations Registration[]
   attendance  Attendance[]
   certificates Certificate[]
+  payments    Payment[]
+  raffles     Raffle[]
+  raffleWinners RaffleWinner[]
 
   @@index([status])
   @@index([slug])
@@ -245,6 +297,9 @@ model Registration {
   activityRegistrations ActivityRegistration[]
   attendance Attendance[]
   certificates Certificate[]
+  qrActive    Boolean          @default(true)
+  payment     Payment?
+  raffleWins  RaffleWinner[]
 
   @@unique([userId, eventId])
   @@index([eventId])
@@ -338,4 +393,216 @@ model AuditLog {
 
   @@index([action])
   @@index([createdAt])
+}
+
+// ============================================================
+// PAGAMENTOS / PIX
+// ============================================================
+
+model PixConfig {
+  id           String   @id @default(cuid())
+  key          String
+  keyType      String   @default("EVP")
+  receiverName String
+  city         String
+  description  String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  payments Payment[]
+
+  @@index([active])
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  code           String        @unique
+  userId         String
+  eventId        String?
+  registrationId String?       @unique
+  orderId        String?       @unique
+  amountCents    Int
+  method         String        @default("PIX")
+  status         PaymentStatus @default(PENDING)
+  pixConfigId    String?
+  pixPayload     String?       @db.Text
+  txid           String?       @unique
+  paidAt         DateTime?
+  confirmedById  String?
+  notes          String?
+  expiresAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user         User          @relation("PaymentUser", fields: [userId], references: [id])
+  event        Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  registration Registration? @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+  order        Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  pixConfig    PixConfig?    @relation(fields: [pixConfigId], references: [id], onDelete: SetNull)
+  confirmedBy  User?         @relation("PaymentConfirmer", fields: [confirmedById], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([eventId])
+}
+
+// ============================================================
+// PRODUTOS / CUPONS / PEDIDOS
+// ============================================================
+
+model Product {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  priceCents  Int
+  imageUrl    String?
+  status      ProductStatus @default(ACTIVE)
+  stock       Int?
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  orderItems OrderItem[]
+
+  @@index([status])
+}
+
+model Coupon {
+  id                 String     @id @default(cuid())
+  code               String     @unique
+  type               CouponType
+  value              Int
+  validFrom          DateTime?
+  validUntil         DateTime?
+  maxUses            Int?
+  usedCount          Int        @default(0)
+  minOrderValueCents Int?
+  active             Boolean    @default(true)
+  deletedAt          DateTime?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  orders Order[]
+
+  @@index([code])
+  @@index([active])
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  code          String      @unique
+  userId        String
+  subtotalCents Int
+  discountCents Int         @default(0)
+  totalCents    Int
+  couponId      String?
+  couponCode    String?
+  status        OrderStatus @default(PENDING)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  user    User        @relation(fields: [userId], references: [id])
+  coupon  Coupon?     @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  items   OrderItem[]
+  payment Payment?
+
+  @@index([userId])
+  @@index([status])
+}
+
+model OrderItem {
+  id             String  @id @default(cuid())
+  orderId        String
+  productId      String?
+  productName    String
+  unitPriceCents Int
+  quantity       Int
+  subtotalCents  Int
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+}
+
+// ============================================================
+// COMUNICACAO
+// ============================================================
+
+model Conversation {
+  id            String             @id @default(cuid())
+  userId        String
+  subject       String?
+  status        ConversationStatus @default(OPEN)
+  assignedToId  String?
+  lastMessageAt DateTime           @default(now())
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  user       User      @relation("ConversationUser", fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo User?     @relation("ConversationAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages   Message[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  senderId       String
+  senderRole     Role
+  body           String   @db.Text
+  readAt         DateTime?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("MessageSender", fields: [senderId], references: [id])
+
+  @@index([conversationId])
+}
+
+// ============================================================
+// SORTEIOS
+// ============================================================
+
+model Raffle {
+  id            String       @id @default(cuid())
+  eventId       String
+  prize         String
+  allowRepeat   Boolean      @default(false)
+  status        RaffleStatus @default(OPEN)
+  eligibleCount Int          @default(0)
+  createdById   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  event     Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdBy User?          @relation("RaffleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  winners   RaffleWinner[]
+
+  @@index([eventId])
+}
+
+model RaffleWinner {
+  id                  String   @id @default(cuid())
+  raffleId            String
+  eventId             String
+  userId              String
+  registrationId      String
+  prizeSnapshot       String
+  eligibleCountAtDraw Int
+  drawnAt             DateTime @default(now())
+  drawnById           String?
+
+  raffle       Raffle       @relation(fields: [raffleId], references: [id], onDelete: Cascade)
+  event        Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user         User         @relation("RaffleWinnerUser", fields: [userId], references: [id])
+  registration Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  drawnBy      User?        @relation("RaffleDrawer", fields: [drawnById], references: [id], onDelete: SetNull)
+
+  @@unique([raffleId, userId])
+  @@index([eventId])
+  @@index([userId])
 }

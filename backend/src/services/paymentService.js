@@ -23,14 +23,50 @@ export async function createPayment({ userId, eventId = null, registrationId = n
   const pix = await getActivePixConfig();
   if (!pix) throw new ApiError(409, 'Nenhuma chave PIX ativa configurada. Contate a organização.');
 
-  // Idempotência: reaproveita um pagamento pendente do mesmo vínculo.
+  // Validade do PIX: definida pelo admin (PixConfig.expiresMinutes), máx. 2h.
+  const rawMinutes = Number(pix.expiresMinutes ?? 30);
+  const minutes = Math.min(Math.max(Number.isFinite(rawMinutes) ? rawMinutes : 30, 1), 120);
+  const expiresAt = new Date(Date.now() + minutes * 60000);
+
+  const makeCode = () => {
+    const c = generatePaymentCode();
+    return { code: c, txid: c.replace(/[^A-Za-z0-9]/g, '') };
+  };
+
+  // Um pagamento por vínculo (unique em registrationId/orderId): reaproveita se
+  // PENDENTE e válido; se expirou, REGENERA in-place (novo código/validade) em
+  // vez de criar outra linha (o que violaria o unique).
+  const reuseOrRegenerate = async (where) => {
+    const existing = await prisma.payment.findUnique({ where });
+    if (!existing) return null;
+    if (['PAID', 'CANCELLED', 'REFUNDED'].includes(existing.status)) return null;
+    if (existing.status === 'PENDING' && (!existing.expiresAt || existing.expiresAt.getTime() > Date.now())) {
+      return existing;
+    }
+    const { code: newCode, txid: newTxid } = makeCode();
+    const newPayload = buildPayloadWith(pix, { amountCents: amount, txid: newTxid, description });
+    return prisma.payment.update({
+      where: { id: existing.id },
+      data: {
+        code: newCode,
+        txid: newTxid,
+        pixPayload: newPayload,
+        expiresAt,
+        status: 'PENDING',
+        pixConfigId: pix.id,
+        paidAt: null,
+        confirmedById: null,
+      },
+      include: paymentInclude,
+    });
+  };
   if (registrationId) {
-    const existing = await prisma.payment.findUnique({ where: { registrationId } });
-    if (existing && existing.status === 'PENDING') return existing;
+    const reuse = await reuseOrRegenerate({ registrationId });
+    if (reuse) return reuse;
   }
   if (orderId) {
-    const existing = await prisma.payment.findUnique({ where: { orderId } });
-    if (existing && existing.status === 'PENDING') return existing;
+    const reuse = await reuseOrRegenerate({ orderId });
+    if (reuse) return reuse;
   }
 
   const code = generatePaymentCode();
@@ -49,6 +85,7 @@ export async function createPayment({ userId, eventId = null, registrationId = n
       pixConfigId: pix.id,
       pixPayload,
       txid,
+      expiresAt,
     },
     include: paymentInclude,
   });
@@ -68,12 +105,22 @@ function formatBRL(cents) {
 }
 
 export async function getPaymentById(id) {
-  const payment = await prisma.payment.findUnique({ where: { id }, include: { ...paymentInclude, user: { select: { id: true, name: true, email: true } } } });
+  let payment = await prisma.payment.findUnique({ where: { id }, include: { ...paymentInclude, user: { select: { id: true, name: true, email: true } } } });
   if (!payment) throw new ApiError(404, 'Pagamento não encontrado.');
+  // O backend é a autoridade da expiração (não o frontend).
+  if (payment.status === 'PENDING' && payment.expiresAt && payment.expiresAt.getTime() <= Date.now()) {
+    await prisma.payment.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'EXPIRED' } });
+    payment = { ...payment, status: 'EXPIRED' };
+  }
   return payment;
 }
 
 export async function listMyPayments(userId) {
+  // Expira de forma ociosa os PIX vencidos que ainda constam como PENDING.
+  await prisma.payment.updateMany({
+    where: { userId, status: 'PENDING', expiresAt: { lte: new Date() } },
+    data: { status: 'EXPIRED' },
+  });
   return prisma.payment.findMany({ where: { userId }, include: paymentInclude, orderBy: { createdAt: 'desc' } });
 }
 

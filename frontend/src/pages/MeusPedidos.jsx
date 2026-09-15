@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Download, FileText, ShoppingBag } from 'lucide-react';
+import { Download, ShoppingBag, XCircle } from 'lucide-react';
 import { orderApi } from '../api/services';
 import { useApi } from '../hooks/useApi';
 import { useToast } from '../context/ToastContext';
 import { Button, Card, StatusBadge, Spinner, ErrorState, EmptyState } from '../components/ui';
+import { ConfirmDialog } from '../components/Overlay';
 import { PixCard, formatBRL } from '../components/PixCard';
 import { formatDateTime } from '../utils/format';
 import { getErrorMessage } from '../api/client';
@@ -11,17 +12,33 @@ import { getErrorMessage } from '../api/client';
 export default function MeusPedidos() {
   const toast = useToast();
   const [payment, setPayment] = useState(null);
+  const [payOrderId, setPayOrderId] = useState(null);
   const [busy, setBusy] = useState(null);
+  const [cancelId, setCancelId] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+
   const { data, loading, error, reload } = useApi(() => orderApi.mine().then((r) => r.data.orders), []);
 
   const pay = async (id) => {
     setBusy(id);
     try {
       const res = await orderApi.pay(id);
+      setPayOrderId(id);
       setPayment(res.data.payment);
       reload();
     } catch (e) { toast.error(getErrorMessage(e)); }
     finally { setBusy(null); }
+  };
+
+  const doCancel = async () => {
+    setCancelling(true);
+    try {
+      await orderApi.cancel(cancelId);
+      toast.success('Compra cancelada com sucesso.');
+      if (payOrderId === cancelId) { setPayment(null); setPayOrderId(null); }
+      reload();
+    } catch (e) { toast.error(getErrorMessage(e)); }
+    finally { setCancelling(false); setCancelId(null); }
   };
 
   const downloadReceipt = async (id, code) => {
@@ -61,6 +78,9 @@ export default function MeusPedidos() {
                 </div>
                 <div className="flex">
                   {o.status === 'PENDING' && <Button size="sm" loading={busy === o.id} onClick={() => pay(o.id)}>Pagar com PIX</Button>}
+                  {o.status === 'PENDING' && (
+                    <Button size="sm" variant="ghost" onClick={() => setCancelId(o.id)} icon={<XCircle size={15} />}>Cancelar compra</Button>
+                  )}
                   <Button size="sm" variant="secondary" onClick={() => downloadReceipt(o.id, o.code)} icon={<Download size={15} />}>Comprovante</Button>
                 </div>
               </div>
@@ -84,9 +104,20 @@ export default function MeusPedidos() {
 
       {payment && (
         <div className="mt-3">
-          <PixCard payment={payment} title="Pagamento do pedido" />
+          <PixCard payment={payment} title="Pagamento do pedido" onRegenerate={payOrderId ? () => pay(payOrderId) : null} />
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!cancelId}
+        title="Cancelar compra"
+        message="Tem certeza que deseja cancelar esta compra?"
+        confirmLabel="Cancelar compra"
+        danger
+        loading={cancelling}
+        onConfirm={doCancel}
+        onClose={() => setCancelId(null)}
+      />
     </>
   );
 }

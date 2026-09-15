@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Send, Plus, MessagesSquare } from 'lucide-react';
 import { conversationApi } from '../api/services';
 import { useApi } from '../hooks/useApi';
+import { useLiveConversation } from '../hooks/useLiveConversation';
 import { useToast } from '../context/ToastContext';
 import { Button, Field, Input, Textarea, Select, Card, StatusBadge, Spinner, ErrorState, EmptyState } from '../components/ui';
 import { Modal } from '../components/Overlay';
@@ -20,11 +21,9 @@ export default function Comunicacao() {
 
   const list = useApi(() => conversationApi.mine().then((r) => r.data.conversations), []);
   const admins = useApi(() => conversationApi.admins().then((r) => r.data.admins), []);
-  const detail = useApi(() => (selectedId ? conversationApi.get(selectedId).then((r) => r.data.conversation) : Promise.resolve(null)), [selectedId]);
+  const { conversation: detail, threadRef, onScroll, markRead, reload: reloadDetail } = useLiveConversation(selectedId);
 
-  useEffect(() => {
-    if (selectedId) conversationApi.markRead(selectedId).catch(() => {});
-  }, [selectedId]);
+  useEffect(() => { if (selectedId) markRead(); /* eslint-disable-next-line */ }, [selectedId]);
 
   const start = async (e) => {
     e.preventDefault();
@@ -45,7 +44,7 @@ export default function Comunicacao() {
     try {
       await conversationApi.send(selectedId, reply.trim());
       setReply('');
-      detail.reload();
+      reloadDetail();
       list.reload();
     } catch (err) { toast.error(getErrorMessage(err)); }
     finally { setSending(false); }
@@ -79,21 +78,21 @@ export default function Comunicacao() {
 
         <div>
           {!selectedId && <p className="text-muted">Selecione uma conversa ou inicie uma nova.</p>}
-          {selectedId && detail.data && (
+          {selectedId && detail && (
             <Card className="card-pad">
               <div className="flex-between mb-2">
-                <strong>{detail.data.subject || 'Conversa'}</strong>
-                <StatusBadge status={detail.data.status} label={detail.data.status === 'OPEN' ? 'Aberta' : 'Resolvida'} tone={detail.data.status === 'OPEN' ? 'success' : 'neutral'} />
+                <strong>{detail.subject || 'Conversa'}</strong>
+                <StatusBadge status={detail.status} label={detail.status === 'OPEN' ? 'Aberta' : 'Resolvida'} tone={detail.status === 'OPEN' ? 'success' : 'neutral'} />
               </div>
-              <div className="chat-thread mb-2">
-                {(detail.data.messages || []).map((m) => (
+              <div className="chat-thread mb-2" ref={threadRef} onScroll={onScroll}>
+                {(detail.messages || []).map((m) => (
                   <div key={m.id} className={`chat-bubble ${m.senderId === user?.id ? 'chat-bubble--mine' : ''}`}>
                     <div>{m.body}</div>
                     <div className="chat-bubble__meta">{m.sender?.name} · {formatDateTime(m.createdAt)}</div>
                   </div>
                 ))}
               </div>
-              {detail.data.status === 'OPEN' ? (
+              {detail.status === 'OPEN' ? (
                 <form onSubmit={send} className="flex">
                   <Input value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Escreva uma mensagem..." />
                   <Button type="submit" loading={sending} icon={<Send size={16} />}>Enviar</Button>

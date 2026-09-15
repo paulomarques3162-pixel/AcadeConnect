@@ -140,7 +140,7 @@ export default function InscricaoDetail() {
                   <strong>Pagamento confirmado. QR Code de entrada liberado.</strong>
                 </div>
               ) : (
-                <PixCard payment={payment} title="PIX da inscrição" />
+                <PixCard payment={payment} title="PIX da inscrição" onRegenerate={generatePayment} />
               )
             ) : (
               <>

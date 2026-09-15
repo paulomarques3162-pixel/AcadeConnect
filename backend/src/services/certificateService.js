@@ -272,17 +272,56 @@ export async function autoIssueCertificatesForEvent(eventId) {
   const hasCert = new Set(existingCerts.map((c) => c.registrationId));
 
   let issued = 0;
+  let skipped = 0;
+  let notEligible = 0;
   for (const reg of eligibleRegs) {
+    // Já possui certificado válido -> não duplica.
+    if (hasCert.has(reg.id)) { skipped += 1; continue; }
     const reqCount = reqCountByReg.get(reg.id) || 0;
-    if (reqCount === 0) continue;
     const present = presentByReg.get(reg.id) || 0;
-    const percentage = Math.round((present / reqCount) * 100);
-    if (percentage >= event.minimumAttendancePercentage && !hasCert.has(reg.id)) {
-      await issueEventCertificate(reg.id);
-      issued += 1;
-    }
+    const percentage = reqCount === 0 ? 0 : Math.round((present / reqCount) * 100);
+    if (reqCount === 0 || percentage < event.minimumAttendancePercentage) { notEligible += 1; continue; }
+    await issueEventCertificate(reg.id);
+    issued += 1;
   }
-  return { issued };
+  return { issued, skipped, notEligible };
+}
+
+/**
+ * Cancela um certificado (ação administrativa). Não apaga: preserva o
+ * histórico e notifica o usuário.
+ */
+export async function cancelCertificate(certificateId, { reason, operatorId = null } = {}) {
+  const certificate = await prisma.certificate.findUnique({ where: { id: certificateId } });
+  if (!certificate) throw new ApiError(404, 'Certificado não encontrado.');
+  if (certificate.status === 'CANCELLED') throw new ApiError(409, 'Este certificado já está cancelado.');
+
+  const updated = await prisma.certificate.update({
+    where: { id: certificateId },
+    data: {
+      status: 'CANCELLED',
+      invalidatedAt: new Date(),
+      correctionReason: reason ? String(reason).trim() : 'Cancelado pelo administrador',
+      correctedById: operatorId || null,
+      correctedAt: new Date(),
+    },
+  });
+
+  await createNotification({
+    userId: certificate.userId,
+    type: 'CERTIFICATE',
+    title: 'Certificado cancelado',
+    message: 'Seu certificado foi cancelado pela organização.',
+    link: '/certificados',
+  });
+  await createAuditLog({
+    userId: operatorId,
+    action: 'CERTIFICATE_CANCELLED',
+    resource: 'Certificate',
+    resourceId: certificateId,
+    details: { reason: reason ? String(reason).trim() : null },
+  });
+  return updated;
 }
 
 /**

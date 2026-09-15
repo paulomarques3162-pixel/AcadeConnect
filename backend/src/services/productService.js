@@ -16,7 +16,7 @@ export async function listPublicProducts({ search } = {}) {
       status: 'ACTIVE',
       ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
     },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }],
   });
   return products.map(enrich);
 }
@@ -48,6 +48,7 @@ export async function createProduct(data, operatorId) {
       priceCents: Number(data.priceCents),
       imageUrl: data.imageUrl || null,
       status: data.status || 'ACTIVE',
+      featured: data.featured === true || data.featured === 'true',
       stock: data.stock === undefined || data.stock === null || data.stock === '' ? null : Number(data.stock),
     },
   });
@@ -65,6 +66,7 @@ export async function updateProduct(id, data, operatorId, file) {
       ...(data.description !== undefined ? { description: data.description ? String(data.description).trim() : null } : {}),
       ...(data.priceCents !== undefined ? { priceCents: Number(data.priceCents) } : {}),
       ...(data.status !== undefined ? { status: data.status } : {}),
+      ...(data.featured !== undefined ? { featured: !!(data.featured === true || data.featured === 'true') } : {}),
       ...(data.stock !== undefined ? { stock: data.stock === null || data.stock === '' ? null : Number(data.stock) } : {}),
       ...(file ? { imageUrl: file.filename } : {}),
     },

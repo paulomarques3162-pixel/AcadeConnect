@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Send, CheckCircle2, RotateCcw, Mail, Search, User } from 'lucide-react';
 import { conversationApi, adminApi } from '../../api/services';
 import { useApi } from '../../hooks/useApi';
+import { useLiveConversation } from '../../hooks/useLiveConversation';
 import { useToast } from '../../context/ToastContext';
 import { Button, Field, Input, Textarea, Card, StatusBadge, Spinner, ErrorState, EmptyState } from '../../components/ui';
 import { Modal } from '../../components/Overlay';
@@ -27,11 +28,9 @@ export default function AdminComunicacao() {
   const [starting, setStarting] = useState(false);
 
   const list = useApi(() => conversationApi.adminList().then((r) => r.data.conversations), []);
-  const detail = useApi(() => (selectedId ? conversationApi.get(selectedId).then((r) => r.data.conversation) : Promise.resolve(null)), [selectedId]);
+  const { conversation: detail, threadRef, onScroll, markRead, reload: reloadDetail } = useLiveConversation(selectedId);
 
-  useEffect(() => {
-    if (selectedId) conversationApi.markRead(selectedId).catch(() => {});
-  }, [selectedId]);
+  useEffect(() => { if (selectedId) markRead(); /* eslint-disable-next-line */ }, [selectedId]);
 
   const send = async (e) => {
     e.preventDefault();
@@ -40,14 +39,14 @@ export default function AdminComunicacao() {
     try {
       await conversationApi.send(selectedId, reply.trim());
       setReply('');
-      detail.reload();
+      reloadDetail();
       list.reload();
     } catch (err) { toast.error(getErrorMessage(err)); }
     finally { setSending(false); }
   };
 
   const setStatus = async (status) => {
-    try { await conversationApi.setStatus(selectedId, status); toast.success(status === 'RESOLVED' ? 'Conversa resolvida.' : 'Conversa reaberta.'); detail.reload(); list.reload(); }
+    try { await conversationApi.setStatus(selectedId, status); toast.success(status === 'RESOLVED' ? 'Conversa resolvida.' : 'Conversa reaberta.'); reloadDetail(); list.reload(); }
     catch (e) { toast.error(getErrorMessage(e)); }
   };
 
@@ -110,22 +109,22 @@ export default function AdminComunicacao() {
 
         <div>
           {!selectedId && <p className="text-muted">Selecione uma conversa ou clique em “Nova mensagem”.</p>}
-          {selectedId && detail.data && (
+          {selectedId && detail && (
             <Card className="card-pad">
               <div className="flex-between mb-2">
                 <div>
-                  <strong>{detail.data.user?.name}</strong>
-                  <p className="text-muted" style={{ margin: 0, fontSize: '0.82rem' }}>{detail.data.subject || 'Sem assunto'}</p>
+                  <strong>{detail.user?.name}</strong>
+                  <p className="text-muted" style={{ margin: 0, fontSize: '0.82rem' }}>{detail.subject || 'Sem assunto'}</p>
                 </div>
-                {detail.data.status === 'OPEN' ? (
+                {detail.status === 'OPEN' ? (
                   <Button size="sm" variant="secondary" onClick={() => setStatus('RESOLVED')} icon={<CheckCircle2 size={15} />}>Resolver</Button>
                 ) : (
                   <Button size="sm" variant="secondary" onClick={() => setStatus('OPEN')} icon={<RotateCcw size={15} />}>Reabrir</Button>
                 )}
               </div>
 
-              <div className="chat-thread mb-2">
-                {(detail.data.messages || []).map((m) => (
+              <div className="chat-thread mb-2" ref={threadRef} onScroll={onScroll}>
+                {(detail.messages || []).map((m) => (
                   <div key={m.id} className={`chat-bubble ${m.senderId === user?.id ? 'chat-bubble--mine' : ''}`}>
                     <div>{m.body}</div>
                     <div className="chat-bubble__meta">{m.sender?.name} · {formatDateTime(m.createdAt)}</div>
@@ -133,7 +132,7 @@ export default function AdminComunicacao() {
                 ))}
               </div>
 
-              {detail.data.status === 'OPEN' ? (
+              {detail.status === 'OPEN' ? (
                 <form onSubmit={send} className="flex">
                   <Input value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Escreva uma resposta..." />
                   <Button type="submit" loading={sending} icon={<Send size={16} />}>Enviar</Button>

@@ -4,7 +4,7 @@ import { ApiError } from '../utils/apiError.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { publicUrl } from '../config/multer.js';
-import { issueEventCertificate, issueActivityCertificate, autoIssueCertificatesForEvent, correctCertificate as correctCertificateService } from '../services/certificateService.js';
+import { issueEventCertificate, issueActivityCertificate, autoIssueCertificatesForEvent, correctCertificate as correctCertificateService, cancelCertificate as cancelCertificateService } from '../services/certificateService.js';
 import { createAuditLog } from '../services/auditLogService.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -137,6 +137,14 @@ export const issueCertificate = asyncHandler(async (req, res) => {
     certificate = await issueEventCertificate(registrationId, { operatorId: req.user.id, force: !!force });
   }
   return apiResponse(res, { status: 201, message: 'Certificado emitido com sucesso.', data: { certificate } });
+});
+
+export const cancelCertificate = asyncHandler(async (req, res) => {
+  const certificate = await cancelCertificateService(req.params.id, {
+    reason: req.body.reason,
+    operatorId: req.user.id,
+  });
+  return apiResponse(res, { message: 'Certificado cancelado.', data: { certificate } });
 });
 
 export const runAutoIssue = asyncHandler(async (req, res) => {

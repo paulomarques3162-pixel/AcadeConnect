@@ -1,13 +1,14 @@
 import { prisma } from '../config/prisma.js';
 import { ApiError } from '../utils/apiError.js';
 import { createAuditLog } from './auditLogService.js';
+import { createNotification } from './notificationService.js';
 import { validateCoupon, computeDiscountCents } from './couponService.js';
 import { createPayment } from './paymentService.js';
 import { generateOrderCode } from '../utils/codes.js';
 
 const orderInclude = {
   items: true,
-  payment: { select: { id: true, code: true, status: true, amountCents: true, pixPayload: true, txid: true, paidAt: true } },
+  payment: { select: { id: true, code: true, status: true, amountCents: true, pixPayload: true, txid: true, paidAt: true, expiresAt: true } },
   coupon: { select: { id: true, code: true, type: true, value: true } },
 };
 
@@ -131,6 +132,36 @@ export async function payOrder(orderId, userId) {
   if (!order || order.userId !== userId) throw new ApiError(404, 'Pedido não encontrado.');
   if (order.status !== 'PENDING') throw new ApiError(409, 'Este pedido não está pendente de pagamento.');
   return createPayment({ userId, orderId: order.id, amountCents: order.totalCents, description: `Pedido ${order.code}` });
+}
+
+/**
+ * Usuário cancela o PRÓPRIO pedido quando permitido (não pago).
+ * Devolve estoque e cancela o PIX pendente.
+ */
+export async function cancelOrder(id, userId) {
+  const order = await prisma.order.findUnique({ where: { id }, include: { items: true, payment: true } });
+  if (!order || order.userId !== userId) throw new ApiError(404, 'Pedido não encontrado.');
+  if (order.status === 'CANCELLED') throw new ApiError(409, 'Este pedido já está cancelado.');
+  if (order.status === 'PAID') throw new ApiError(409, 'Pedido já pago não pode ser cancelado. Contate a organização.');
+
+  const updated = await prisma.$transaction(async (tx) => {
+    for (const it of order.items) {
+      if (it.productId) {
+        await tx.product.updateMany({
+          where: { id: it.productId, stock: { not: null } },
+          data: { stock: { increment: it.quantity } },
+        });
+      }
+    }
+    if (order.payment && order.payment.status === 'PENDING') {
+      await tx.payment.update({ where: { id: order.payment.id }, data: { status: 'CANCELLED' } });
+    }
+    return tx.order.update({ where: { id }, data: { status: 'CANCELLED' }, include: orderInclude });
+  });
+
+  await createNotification({ userId, type: 'SYSTEM', title: 'Pedido cancelado', message: `Seu pedido ${order.code} foi cancelado.`, link: '/meus-pedidos' });
+  await createAuditLog({ userId, action: 'ORDER_CANCELLED', resource: 'Order', resourceId: id });
+  return updated;
 }
 
 export async function setOrderStatus(id, status, operatorId) {

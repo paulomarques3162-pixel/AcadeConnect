@@ -22,7 +22,7 @@ const registrationInclude = {
   activityRegistrations: { include: { activity: { include: { speaker: true } } } },
   attendance: { include: { activity: true } },
   certificates: true,
-  payment: { select: { id: true, code: true, status: true, amountCents: true, pixPayload: true, txid: true, paidAt: true } },
+  payment: { select: { id: true, code: true, status: true, amountCents: true, pixPayload: true, txid: true, paidAt: true, expiresAt: true } },
 };
 
 export const registerForEvent = asyncHandler(async (req, res) => {
@@ -228,6 +228,78 @@ export const cancelRegistration = asyncHandler(async (req, res) => {
 /**
  * Register the participant in additional activities of an already-created registration.
  */
+/**
+ * ADMIN/ORGANIZER: restaura/atualiza uma inscrição e suas atividades.
+ * Usuário comum não tem acesso (rota protegida).
+ */
+export const adminUpdateRegistration = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { status, activityIds } = req.body;
+
+  const registration = await prisma.registration.findUnique({
+    where: { id },
+    include: { event: { include: { activities: true } } },
+  });
+  if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
+
+  if (Array.isArray(activityIds)) {
+    const eventActivityIds = new Set(registration.event.activities.map((a) => a.id));
+    const wanted = [...new Set(activityIds.map(String))];
+    for (const aid of wanted) {
+      if (!eventActivityIds.has(aid)) throw new ApiError(409, 'Atividade não pertence a este evento.');
+    }
+    const current = await prisma.activityRegistration.findMany({ where: { registrationId: id } });
+    const currentIds = new Set(current.map((x) => x.activityId));
+    const toAdd = wanted.filter((x) => !currentIds.has(x));
+    const toRemove = current.filter((x) => !wanted.includes(x.activityId));
+
+    for (const r of toRemove) {
+      const att = await prisma.attendance.findUnique({
+        where: { registrationId_activityId: { registrationId: id, activityId: r.activityId } },
+      });
+      if (att && att.status === 'PRESENT') {
+        throw new ApiError(409, 'Não é possível remover uma atividade com presença já registrada.');
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (toAdd.length) {
+        await tx.activityRegistration.createMany({
+          data: toAdd.map((aid) => ({ registrationId: id, activityId: aid, status: 'CONFIRMED' })),
+          skipDuplicates: true,
+        });
+      }
+      if (toRemove.length) {
+        await tx.activityRegistration.deleteMany({
+          where: { registrationId: id, activityId: { in: toRemove.map((r) => r.activityId) } },
+        });
+      }
+    });
+  }
+
+  if (status) {
+    await prisma.registration.update({ where: { id }, data: { status } });
+  }
+
+  const updated = await prisma.registration.findUnique({ where: { id }, include: registrationInclude });
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'REGISTRATION_ADMIN_UPDATED',
+    resource: 'Registration',
+    resourceId: id,
+    details: { status: status || null, activityIds: Array.isArray(activityIds) ? activityIds : null },
+    ip: req.ip,
+  });
+  await createNotification({
+    userId: registration.userId,
+    type: 'REGISTRATION',
+    title: 'Inscrição atualizada',
+    message: `Sua inscrição no evento "${registration.event.name}" foi atualizada pela organização.`,
+    link: `/inscricao/${id}`,
+  });
+  return apiResponse(res, { message: 'Inscrição atualizada.', data: { registration: updated } });
+});
+
 export const registerForActivity = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { activityId } = req.body;

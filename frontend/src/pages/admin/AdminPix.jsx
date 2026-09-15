@@ -9,7 +9,7 @@ import { getErrorMessage } from '../../api/client';
 import { formatDateTime } from '../../utils/format';
 
 const KEY_TYPES = ['CPF', 'CNPJ', 'EMAIL', 'PHONE', 'EVP', 'RANDOM'];
-const empty = { key: '', keyType: 'EVP', receiverName: '', city: '', description: '', active: true };
+const empty = { key: '', keyType: 'EVP', receiverName: '', city: '', description: '', expiresMinutes: 30, active: true };
 
 export default function AdminPix() {
   const toast = useToast();
@@ -22,7 +22,7 @@ export default function AdminPix() {
   const { data, loading, error, reload } = useApi(() => pixApi.list().then((r) => r.data), []);
 
   const openCreate = () => { setEditing(null); setForm(empty); setModalOpen(true); };
-  const openEdit = (c) => { setEditing(c); setForm({ key: c.key, keyType: c.keyType, receiverName: c.receiverName, city: c.city, description: c.description || '', active: c.active }); setModalOpen(true); };
+  const openEdit = (c) => { setEditing(c); setForm({ key: c.key, keyType: c.keyType, receiverName: c.receiverName, city: c.city, description: c.description || '', expiresMinutes: c.expiresMinutes ?? 30, active: c.active }); setModalOpen(true); };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -74,7 +74,7 @@ export default function AdminPix() {
                   <StatusBadge status={c.active ? 'ACTIVE' : 'INACTIVE'} label={c.active ? 'Ativa' : 'Inativa'} tone={c.active ? 'success' : 'neutral'} />
                 </div>
                 <p className="text-muted" style={{ margin: 0, fontSize: '0.85rem' }}>
-                  {c.keyType} · {c.key} · {c.city}{c.description ? ` · ${c.description}` : ''}
+                  {c.keyType} · {c.key} · {c.city}{c.description ? ` · ${c.description}` : ''} · PIX válido {c.expiresMinutes ?? 30} min
                 </p>
                 <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '0.78rem' }}>Atualizada em {formatDateTime(c.updatedAt)}</p>
               </div>
@@ -99,6 +99,9 @@ export default function AdminPix() {
           <Field label="Nome do recebedor" required><Input value={form.receiverName} onChange={(e) => setForm({ ...form, receiverName: e.target.value })} required /></Field>
           <Field label="Cidade" required><Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} required /></Field>
           <Field label="Descrição"><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+          <Field label="Validade do PIX (minutos)" hint="Entre 1 e 120 (máx. 2 horas).">
+            <Input type="number" min="1" max="120" value={form.expiresMinutes} onChange={(e) => setForm({ ...form, expiresMinutes: e.target.value })} />
+          </Field>
           <Checkbox label="Chave ativa" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
           <Button type="submit" loading={saving}>Salvar</Button>
         </form>

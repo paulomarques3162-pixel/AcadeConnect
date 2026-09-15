@@ -1,11 +1,27 @@
 import { useMemo, useState } from 'react';
-import { ShoppingCart, Tag, Trash2 } from 'lucide-react';
+import { ShoppingCart, Tag, Trash2, Star } from 'lucide-react';
 import { productApi, orderApi, couponApi } from '../api/services';
 import { useApi } from '../hooks/useApi';
 import { useToast } from '../context/ToastContext';
 import { Button, Input, Card, Spinner, ErrorState, EmptyState, SmartImage } from '../components/ui';
 import { PixCard, formatBRL } from '../components/PixCard';
 import { getErrorMessage } from '../api/client';
+
+function ProductCard({ p, cart, setQty }) {
+  return (
+    <Card className="card-pad">
+      <SmartImage src={p.imageUrl} alt={p.name} className="event-card__banner-img" fallbackLetter={p.name.charAt(0)} />
+      <h4 style={{ margin: '10px 0 4px' }}>{p.name}</h4>
+      <p className="text-muted" style={{ margin: '0 0 8px', fontSize: '0.85rem' }}>{p.description || 'Sem descrição'}</p>
+      <p style={{ margin: '0 0 8px' }}><strong>{formatBRL(p.priceCents)}</strong>{p.stock !== null && p.stock !== undefined ? ` · ${p.stock} disponível(is)` : ''}</p>
+      <div className="flex">
+        <Button size="sm" variant="secondary" onClick={() => setQty(p.id, (cart[p.id] || 0) - 1)}>-</Button>
+        <span style={{ minWidth: 26, textAlign: 'center', fontWeight: 700 }}>{cart[p.id] || 0}</span>
+        <Button size="sm" variant="secondary" onClick={() => setQty(p.id, (cart[p.id] || 0) + 1)} disabled={p.stock !== null && p.stock !== undefined && (cart[p.id] || 0) >= p.stock}>+</Button>
+      </div>
+    </Card>
+  );
+}
 
 export default function Loja() {
   const toast = useToast();
@@ -14,9 +30,12 @@ export default function Loja() {
   const [preview, setPreview] = useState(null);
   const [creating, setCreating] = useState(false);
   const [payment, setPayment] = useState(null);
+  const [orderId, setOrderId] = useState(null);
 
   const { data, loading, error, reload } = useApi(() => productApi.list().then((r) => r.data.products), []);
   const products = data || [];
+  const featured = products.filter((p) => p.featured);
+  const others = products.filter((p) => !p.featured);
 
   const items = useMemo(
     () => Object.entries(cart).filter(([, q]) => q > 0).map(([productId, quantity]) => ({ productId, quantity })),
@@ -52,6 +71,7 @@ export default function Loja() {
     try {
       const res = await orderApi.create({ items, couponCode: couponCode.trim() || null });
       const order = res.data.order;
+      setOrderId(order.id);
       setCart({});
       setCouponCode('');
       setPreview(null);
@@ -63,6 +83,11 @@ export default function Loja() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const regenerate = async () => {
+    const pay = await orderApi.pay(orderId);
+    setPayment(pay.data.payment);
   };
 
   return (
@@ -77,23 +102,29 @@ export default function Loja() {
       {loading && <Spinner text="Carregando produtos..." />}
       {error && <ErrorState onRetry={reload} />}
 
-      {!loading && !error && (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
-          {products.length === 0 && <EmptyState icon={<ShoppingCart size={28} />} title="Nenhum produto disponível." />}
-          {products.map((p) => (
-            <Card className="card-pad" key={p.id}>
-              <SmartImage src={p.imageUrl} alt={p.name} className="event-card__banner-img" fallbackLetter={p.name.charAt(0)} />
-              <h4 style={{ margin: '10px 0 4px' }}>{p.name}</h4>
-              <p className="text-muted" style={{ margin: '0 0 8px', fontSize: '0.85rem' }}>{p.description || 'Sem descrição'}</p>
-              <p style={{ margin: '0 0 8px' }}><strong>{formatBRL(p.priceCents)}</strong>{p.stock !== null && p.stock !== undefined ? ` · ${p.stock} disponível(is)` : ''}</p>
-              <div className="flex">
-                <Button size="sm" variant="secondary" onClick={() => setQty(p.id, (cart[p.id] || 0) - 1)}>-</Button>
-                <span style={{ minWidth: 26, textAlign: 'center', fontWeight: 700 }}>{cart[p.id] || 0}</span>
-                <Button size="sm" variant="secondary" onClick={() => setQty(p.id, (cart[p.id] || 0) + 1)} disabled={p.stock !== null && p.stock !== undefined && (cart[p.id] || 0) >= p.stock}>+</Button>
-              </div>
-            </Card>
-          ))}
-        </div>
+      {!loading && !error && products.length === 0 && (
+        <EmptyState icon={<ShoppingCart size={28} />} title="Nenhum produto disponível." />
+      )}
+
+      {!loading && !error && featured.length > 0 && (
+        <section className="mb-3">
+          <div className="flex mb-2" style={{ gap: 8 }}>
+            <Star size={18} color="var(--accent)" />
+            <h2 style={{ margin: 0, fontSize: '1.2rem' }}>Produtos em destaque</h2>
+          </div>
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
+            {featured.map((p) => <ProductCard key={p.id} p={p} cart={cart} setQty={setQty} />)}
+          </div>
+        </section>
+      )}
+
+      {!loading && !error && others.length > 0 && (
+        <section>
+          {featured.length > 0 && <h2 style={{ marginBottom: 12, fontSize: '1.2rem' }}>Todos os produtos</h2>}
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
+            {others.map((p) => <ProductCard key={p.id} p={p} cart={cart} setQty={setQty} />)}
+          </div>
+        </section>
       )}
 
       {(items.length > 0 || payment) && (
@@ -128,7 +159,7 @@ export default function Loja() {
           {!payment && <Button className="btn--lg" loading={creating} onClick={finish} icon={<ShoppingCart size={18} />}>Finalizar pedido e gerar PIX</Button>}
           {payment && (
             <div className="mt-2">
-              <PixCard payment={payment} title="Pagamento do pedido" />
+              <PixCard payment={payment} title="Pagamento do pedido" onRegenerate={orderId ? regenerate : null} />
             </div>
           )}
         </Card>

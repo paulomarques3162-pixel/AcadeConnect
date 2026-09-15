@@ -18,6 +18,7 @@ router.get('/:id/download', validate(certificateSchemas.idParam), ctrl.downloadC
 // Admin only
 router.post('/issue', authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.issue), ctrl.issueCertificate);
 router.post('/:id/correct', authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.correct), ctrl.correctCertificate);
+router.post('/:id/cancel', authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.cancel), ctrl.cancelCertificate);
 router.post('/auto/:eventId', authorize('ADMIN', 'ORGANIZER'), ctrl.runAutoIssue);
 router.get('/admin/list', authorize('ADMIN', 'ORGANIZER'), ctrl.listCertificates);
 

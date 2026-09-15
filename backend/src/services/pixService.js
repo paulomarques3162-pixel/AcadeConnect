@@ -5,6 +5,12 @@ import { buildPixPayload } from '../utils/pix.js';
 
 const KEY_TYPES = ['CPF', 'CNPJ', 'EMAIL', 'PHONE', 'EVP', 'RANDOM'];
 
+function clampExpiresMinutes(value, fallback = 30) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(Math.trunc(n), 1), 120);
+}
+
 function assertKeyType(keyType) {
   if (keyType && !KEY_TYPES.includes(String(keyType).toUpperCase())) {
     throw new ApiError(422, 'Tipo de chave PIX inválido.');
@@ -34,6 +40,7 @@ export async function createPixConfig(data, operatorId) {
         city: String(data.city).trim(),
         description: data.description ? String(data.description).trim() : null,
         active: data.active !== false,
+        expiresMinutes: clampExpiresMinutes(data.expiresMinutes, 30),
       },
     });
   });
@@ -59,6 +66,7 @@ export async function updatePixConfig(id, data, operatorId) {
         ...(data.city !== undefined ? { city: String(data.city).trim() } : {}),
         ...(data.description !== undefined ? { description: data.description ? String(data.description).trim() : null } : {}),
         ...(data.active !== undefined ? { active: !!data.active } : {}),
+        ...(data.expiresMinutes !== undefined ? { expiresMinutes: clampExpiresMinutes(data.expiresMinutes, 30) } : {}),
       },
     });
   });

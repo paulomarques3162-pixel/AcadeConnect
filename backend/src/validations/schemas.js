@@ -154,6 +154,13 @@ export const registrationSchemas = {
     params: Joi.object({ id: Joi.string().required() }),
     body: Joi.object({ action: Joi.string().valid('regenerate', 'invalidate', 'reactivate').required() }),
   },
+  adminUpdate: {
+    params: Joi.object({ id: Joi.string().required() }),
+    body: Joi.object({
+      status: Joi.string().valid('CONFIRMED', 'CANCELLED', 'PENDING'),
+      activityIds: Joi.array().items(Joi.string()),
+    }),
+  },
 };
 
 export const attendanceSchemas = {
@@ -205,6 +212,10 @@ export const certificateSchemas = {
       hours: Joi.number().min(0).allow(null, ''),
       reason: Joi.string().trim().max(300).allow('', null),
     }),
+  },
+  cancel: {
+    params: Joi.object({ id: Joi.string().required() }),
+    body: Joi.object({ reason: Joi.string().trim().max(300).allow('', null) }),
   },
   codeParam: { params: Joi.object({ code: Joi.string().required() }) },
   idParam: { params: Joi.object({ id: Joi.string().required() }) },

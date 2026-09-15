@@ -423,6 +423,8 @@ model PixConfig {
   city         String
   description  String?
   active       Boolean  @default(true)
+  // Tempo de disponibilidade do PIX (minutos). Máximo 120 (2h), aplicado no service.
+  expiresMinutes Int    @default(30)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -474,6 +476,7 @@ model Product {
   priceCents  Int
   imageUrl    String?
   status      ProductStatus @default(ACTIVE)
+  featured    Boolean       @default(false)
   stock       Int?
   deletedAt   DateTime?
   createdAt   DateTime      @default(now())

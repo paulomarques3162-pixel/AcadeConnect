@@ -14,6 +14,9 @@ router.post('/:eventId', validate(registrationSchemas.create), ctrl.registerForE
 router.delete('/:id', validate(registrationSchemas.idParam), ctrl.cancelRegistration);
 router.post('/:id/payment', validate(registrationSchemas.idParam), ctrl.generatePayment);
 
+// Restauração/ajuste administrativo da inscrição e atividades
+router.put('/:id/admin', authorize('ADMIN', 'ORGANIZER'), validate(registrationSchemas.adminUpdate), ctrl.adminUpdateRegistration);
+
 // Controle administrativo do QR de entrada
 router.post('/:id/qr', authorize('ADMIN', 'ORGANIZER'), validate(registrationSchemas.qr), ctrl.adminSetQr);
 

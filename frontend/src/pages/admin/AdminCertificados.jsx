@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Download, Wand2, Award, Pencil } from 'lucide-react';
+import { Download, Wand2, Award, Pencil, XCircle } from 'lucide-react';
 import { certificateApi, eventApi } from '../../api/services';
 import { useApi } from '../../hooks/useApi';
 import { useToast } from '../../context/ToastContext';
 import { DataTable, SearchBar, Pagination } from '../../components/DataTable';
 import { Select, Field, Input, Textarea, StatusBadge, Spinner, ErrorState, Button } from '../../components/ui';
-import { Modal } from '../../components/Overlay';
+import { Modal, ConfirmDialog } from '../../components/Overlay';
 import { formatDate, formatNumber } from '../../utils/format';
 import { getErrorMessage } from '../../api/client';
 
@@ -20,6 +20,8 @@ export default function AdminCertificados() {
   const [correcting, setCorrecting] = useState(null);
   const [form, setForm] = useState({ participantName: '', eventName: '', hours: '', reason: '' });
   const [saving, setSaving] = useState(false);
+  const [toCancel, setToCancel] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
   const events = useApi(() => eventApi.list({ limit: 100 }).then((r) => r.data.events), []);
 
   const { data, loading, error, reload } = useApi(
@@ -32,7 +34,8 @@ export default function AdminCertificados() {
     setAutoBusy(true);
     try {
       const res = await certificateApi.auto(autoEvent);
-      toast.success(`Geração automática concluída (${res.data.issued} certificados).`);
+      const { issued = 0, skipped = 0, notEligible = 0 } = res.data || {};
+      toast.success(`${issued} certificado(s) emitido(s). ${skipped} já possuíam certificado. ${notEligible} não elegível(is).`);
       reload();
     } catch (e) { toast.error(getErrorMessage(e)); }
     finally { setAutoBusy(false); }
@@ -87,6 +90,9 @@ export default function AdminCertificados() {
           {r.status !== 'CANCELLED' && (
             <Button size="sm" variant="ghost" onClick={() => openCorrect(r)} icon={<Pencil size={15} />} title="Corrigir dados (erro de digitação)">Corrigir</Button>
           )}
+          {r.status !== 'CANCELLED' && (
+            <Button size="sm" variant="ghost" onClick={() => setToCancel(r.id)} icon={<XCircle size={15} />} title="Cancelar certificado">Cancelar</Button>
+          )}
         </div>
       ),
     },
@@ -128,6 +134,22 @@ export default function AdminCertificados() {
       {error && <ErrorState onRetry={reload} />}
       {!loading && !error && <DataTable columns={columns} rows={data?.data?.certificates || []} loading={loading} emptyTitle={<><Award size={28} /> Nenhum certificado.</>} />}
       <Pagination page={data?.meta?.page} pages={data?.meta?.pages} total={data?.meta?.total} onPage={setPage} />
+
+      <ConfirmDialog
+        open={!!toCancel}
+        title="Cancelar certificado"
+        message="Tem certeza que deseja cancelar este certificado? O histórico será preservado."
+        confirmLabel="Cancelar certificado"
+        danger
+        loading={cancelling}
+        onConfirm={async () => {
+          setCancelling(true);
+          try { await certificateApi.cancel(toCancel, { reason: 'Cancelado pelo administrador' }); toast.success('Certificado cancelado.'); reload(); }
+          catch (e) { toast.error(getErrorMessage(e)); }
+          finally { setCancelling(false); setToCancel(null); }
+        }}
+        onClose={() => setToCancel(null)}
+      />
 
       <Modal open={!!correcting} onClose={() => setCorrecting(null)} title={`Corrigir certificado ${correcting?.code || ''}`}>
         <form onSubmit={submitCorrect} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

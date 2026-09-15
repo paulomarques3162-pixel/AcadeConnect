@@ -23,6 +23,11 @@ export const pay = asyncHandler(async (req, res) => {
   return apiResponse(res, { status: 201, message: 'PIX gerado.', data: { payment } });
 });
 
+export const cancel = asyncHandler(async (req, res) => {
+  const order = await svc.cancelOrder(req.params.id, req.user.id);
+  return apiResponse(res, { message: 'Compra cancelada com sucesso.', data: { order } });
+});
+
 export const adminList = asyncHandler(async (req, res) => {
   const { orders, meta } = await svc.listOrders(req.query);
   return apiResponse(res, { message: 'Pedidos.', data: { orders }, meta });

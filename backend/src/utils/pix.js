@@ -49,7 +49,9 @@ function sanitize(text, max) {
 export function buildPixPayload({ key, receiverName, city, amountCents = 0, txid, description }) {
   if (!key) throw new Error('Chave PIX não configurada.');
   const gui = emv('00', 'br.gov.bcb.pix');
-  const keyField = emv('01', sanitize(key, 77));
+  // A CHAVE vai literal (trim, <=77) — NUNCA sanitizada: e-mails (@), telefones (+)
+  // e EVP (UUID) precisam dos caracteres originais para serem válidos no app bancário.
+  const keyField = emv('01', String(key).trim().slice(0, 77));
   const descField = description ? emv('02', sanitize(description, 40)) : '';
   const merchant = emv('26', `${gui}${keyField}${descField}`);
 
@@ -58,7 +60,9 @@ export function buildPixPayload({ key, receiverName, city, amountCents = 0, txid
 
   let payload = '';
   payload += emv('00', '01'); // Payload Format Indicator
-  payload += emv('01', cleanTxid ? '12' : '11'); // 12=dinâmico, 11=estático
+  // Este payload é ESTÁTICO (baseado em chave, sem URL) -> 11. O valor "12"
+  // (dinâmico) não é compatível com o que geramos e pode ser recusado por apps.
+  payload += emv('01', '11');
   payload += merchant;
   payload += emv('52', '0000'); // Merchant Category Code
   payload += emv('53', '986'); // BRL

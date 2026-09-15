@@ -3,13 +3,13 @@ import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { productApi } from '../../api/services';
 import { useApi } from '../../hooks/useApi';
 import { useToast } from '../../context/ToastContext';
-import { Button, Field, Input, Textarea, Select, Card, StatusBadge, Spinner, ErrorState, SmartImage } from '../../components/ui';
+import { Button, Field, Input, Textarea, Select, Checkbox, Card, StatusBadge, Spinner, ErrorState, SmartImage } from '../../components/ui';
 import { Modal, ConfirmDialog } from '../../components/Overlay';
 import { getErrorMessage } from '../../api/client';
 import { formatNumber } from '../../utils/format';
 import { formatBRL } from '../../components/PixCard';
 
-const empty = { name: '', description: '', price: '', stock: '', status: 'ACTIVE' };
+const empty = { name: '', description: '', price: '', stock: '', status: 'ACTIVE', featured: false };
 
 export default function AdminProdutos() {
   const toast = useToast();
@@ -23,7 +23,7 @@ export default function AdminProdutos() {
   const { data, loading, error, reload } = useApi(() => productApi.adminList().then((r) => r.data.products), []);
 
   const openCreate = () => { setEditing(null); setForm(empty); setFile(null); setModalOpen(true); };
-  const openEdit = (p) => { setEditing(p); setForm({ name: p.name, description: p.description || '', price: (p.priceCents / 100).toString(), stock: p.stock ?? '', status: p.status }); setFile(null); setModalOpen(true); };
+  const openEdit = (p) => { setEditing(p); setForm({ name: p.name, description: p.description || '', price: (p.priceCents / 100).toString(), stock: p.stock ?? '', status: p.status, featured: !!p.featured }); setFile(null); setModalOpen(true); };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -34,6 +34,7 @@ export default function AdminProdutos() {
       priceCents: Math.round(Number(form.price) * 100),
       stock: form.stock === '' ? null : Number(form.stock),
       status: form.status,
+      featured: form.featured,
     };
     try {
       if (editing) await productApi.updateWithFile(editing.id, payload, file);
@@ -73,7 +74,10 @@ export default function AdminProdutos() {
               <SmartImage src={p.imageUrl} alt={p.name} className="event-card__banner-img" fallbackLetter={p.name.charAt(0)} />
               <div className="flex-between mt-2">
                 <strong>{p.name}</strong>
-                <StatusBadge status={p.status} />
+                <span className="flex" style={{ gap: 6 }}>
+                  {p.featured && <span className="badge badge--warning">⭐ Destaque</span>}
+                  <StatusBadge status={p.status} />
+                </span>
               </div>
               <p className="text-muted" style={{ margin: '6px 0', fontSize: '0.88rem' }}>{p.description || 'Sem descrição'}</p>
               <p style={{ margin: 0 }}><strong>{formatBRL(p.priceCents)}</strong> · {p.stock === null || p.stock === undefined ? 'Estoque ilimitado' : `${formatNumber(p.stock)} em estoque`}</p>
@@ -98,6 +102,7 @@ export default function AdminProdutos() {
               <option value="INACTIVE">Inativo</option>
             </Select>
           </Field>
+          <Checkbox label="⭐ Produto em destaque (aparece primeiro na loja)" checked={form.featured} onChange={(e) => setForm({ ...form, featured: e.target.checked })} />
           <Field label="Foto"><Input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} /></Field>
           <Button type="submit" loading={saving}>Salvar</Button>
         </form>

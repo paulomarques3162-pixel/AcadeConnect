@@ -83,6 +83,7 @@ export const registrationApi = {
   unregisterFromActivity: (id, activityId) => api.delete(`/registrations/${id}/activities/${activityId}`).then(unwrap),
   generatePayment: (id) => api.post(`/registrations/${id}/payment`).then(unwrap),
   adminQr: (id, action) => api.post(`/registrations/${id}/qr`, { action }).then(unwrap),
+  adminUpdate: (id, data) => api.put(`/registrations/${id}/admin`, data).then(unwrap),
 };
 
 // ---- Attendance ----
@@ -114,6 +115,7 @@ export const certificateApi = {
   validate: (code) => api.get(`/certificates/validate/${code}`).then(unwrap),
   issue: (data) => api.post('/certificates/issue', data).then(unwrap),
   correct: (id, data) => api.post(`/certificates/${id}/correct`, data).then(unwrap),
+  cancel: (id, data = {}) => api.post(`/certificates/${id}/cancel`, data).then(unwrap),
   auto: (eventId) => api.post(`/certificates/auto/${eventId}`).then(unwrap),
   adminList: (params) => api.get('/certificates/admin/list', { params }).then(unwrap),
 };
@@ -210,6 +212,7 @@ export const orderApi = {
   pay: (id) => api.post(`/orders/${id}/pay`).then(unwrap),
   adminList: (params) => api.get('/orders/admin/list', { params }).then(unwrap),
   setStatus: (id, status) => api.post(`/orders/${id}/status`, { status }).then(unwrap),
+  cancel: (id) => api.post(`/orders/${id}/cancel`).then(unwrap),
   receiptUrl: (id) => `${API_BASE_URL.replace(/\/$/, '')}/orders/${id}/receipt`,
 };
 

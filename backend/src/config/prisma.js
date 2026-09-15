@@ -27,8 +27,12 @@ function withPoolParams(rawUrl) {
   if (!rawUrl) return rawUrl;
   const defaults = {
     connection_limit: process.env.PRISMA_CONNECTION_LIMIT || '10',
-    pool_timeout: process.env.PRISMA_POOL_TIMEOUT || '20',
+    // Seconds a request waits for a free connection before failing. 20s is too
+    // long under load (requests pile up). Fail fast so the client can retry.
+    pool_timeout: process.env.PRISMA_POOL_TIMEOUT || '10',
     connect_timeout: process.env.PRISMA_CONNECT_TIMEOUT || '10',
+    // Abort a socket that stops responding so a stuck connection is recycled.
+    socket_timeout: process.env.PRISMA_SOCKET_TIMEOUT || '30',
   };
   try {
     const href = /^postgres(ql)?:\/\//.test(rawUrl) ? rawUrl : rawUrl;

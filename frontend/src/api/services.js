@@ -1,5 +1,12 @@
 import { api, unwrap, API_BASE_URL } from './client.js';
 
+// ---- Session bootstrap (V9.2): one request that returns the user + the
+// notification preview + both unread counters, instead of several round-trips
+// immediately after login.
+export const bootstrapApi = {
+  get: () => api.get('/bootstrap', { fresh: true }).then(unwrap),
+};
+
 // ---- Auth ----
 export const authApi = {
   register: (data) => api.post('/auth/register', data).then(unwrap),
@@ -122,8 +129,8 @@ export const certificateApi = {
 
 // ---- Notifications ----
 export const notificationApi = {
-  list: (params) => api.get('/notifications', { params }).then(unwrap),
-  unreadCount: () => api.get('/notifications/unread-count').then(unwrap),
+  list: (params) => api.get('/notifications', { params, fresh: true }).then(unwrap),
+  unreadCount: () => api.get('/notifications/unread-count', { fresh: true }).then(unwrap),
   markRead: (id) => api.post(`/notifications/${id}/read`).then(unwrap),
   markAllRead: () => api.post('/notifications/read-all').then(unwrap),
 };
@@ -224,12 +231,13 @@ export const conversationApi = {
   adminStart: (data) => api.post('/conversations/admin/start', data).then(unwrap),
   get: (id) => api.get(`/conversations/${id}`).then(unwrap),
   // Incremental refresh: returns only messages newer than `since` (ISO date).
-  messagesSince: (id, since) => api.get(`/conversations/${id}/messages`, { params: { since } }).then(unwrap),
+  // `fresh` bypasses the short GET cache — this one must always hit the server.
+  messagesSince: (id, since) => api.get(`/conversations/${id}/messages`, { params: { since }, fresh: true }).then(unwrap),
   start: (data) => api.post('/conversations', data).then(unwrap),
   send: (id, body) => api.post(`/conversations/${id}/messages`, { body }).then(unwrap),
   setStatus: (id, status) => api.post(`/conversations/${id}/status`, { status }).then(unwrap),
   markRead: (id) => api.post(`/conversations/${id}/read`).then(unwrap),
-  unreadCount: () => api.get('/conversations/unread-count').then(unwrap),
+  unreadCount: () => api.get('/conversations/unread-count', { fresh: true }).then(unwrap),
 };
 
 export const exportCsv = async (type, body) => {

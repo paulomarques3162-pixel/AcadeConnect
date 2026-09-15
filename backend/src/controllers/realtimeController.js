@@ -2,6 +2,7 @@ import { signToken } from '../utils/jwt.js';
 import { subscribeUser } from '../services/realtime.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { sseOpened, sseClosed } from '../utils/metrics.js';
 
 /**
  * Issue a SHORT-LIVED token used only to open the SSE stream.
@@ -37,6 +38,7 @@ export const stream = asyncHandler(async (req, res) => {
   };
 
   write({ type: 'connected', at: Date.now() });
+  sseOpened();
 
   const unsubscribe = subscribeUser(req.user.id, write);
 
@@ -50,8 +52,12 @@ export const stream = asyncHandler(async (req, res) => {
   }, 25_000);
   if (ping.unref) ping.unref();
 
+  let closed = false;
   req.on('close', () => {
+    if (closed) return;
+    closed = true;
     clearInterval(ping);
     unsubscribe();
+    sseClosed();
   });
 });

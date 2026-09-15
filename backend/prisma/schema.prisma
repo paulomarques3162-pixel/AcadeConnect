@@ -185,6 +185,7 @@ model User {
   @@index([email])
   @@index([role])
 @@index([createdAt])
+@@index([role, deletedAt])
 }
 
 model Event {
@@ -237,6 +238,7 @@ model Event {
 @@index([deletedAt, status])
 @@index([deletedAt, createdAt])
 @@index([startDate])
+@@index([status, startDate])
 }
 
 model Speaker {
@@ -286,6 +288,7 @@ model Activity {
   @@index([eventId])
   @@index([date])
 @@index([eventId, date])
+@@index([eventId, status])
 }
 
 model Registration {
@@ -314,6 +317,8 @@ model Registration {
 @@index([eventId, status])
 @@index([createdAt])
 @@index([eventId, createdAt])
+@@index([userId, status])
+@@index([status, createdAt])
 }
 
 model ActivityRegistration {
@@ -352,6 +357,8 @@ model Attendance {
   @@index([userId])
 @@index([eventId])
 @@index([eventId, recordedAt])
+@@index([activityId, status])
+@@index([eventId, status])
 }
 
 model Certificate {
@@ -390,6 +397,8 @@ model Certificate {
   @@index([code])
 @@index([eventId])
 @@index([userId, issueDate])
+@@index([eventId, status])
+@@index([status])
 }
 
 model Notification {
@@ -482,6 +491,7 @@ model Payment {
 @@index([status, expiresAt])
 @@index([createdAt])
 @@index([userId, createdAt])
+@@index([status, createdAt])
 }
 
 // ============================================================
@@ -552,6 +562,7 @@ model Order {
   @@index([status])
 @@index([createdAt])
 @@index([userId, createdAt])
+@@index([status, createdAt])
 }
 
 model OrderItem {
@@ -591,6 +602,7 @@ model Conversation {
   @@index([status])
 @@index([lastMessageAt])
 @@index([userId, lastMessageAt])
+@@index([status, lastMessageAt])
 }
 
 model Message {

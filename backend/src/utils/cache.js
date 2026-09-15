@@ -18,6 +18,11 @@ const store = new Map();
 let hits = 0;
 let misses = 0;
 
+// Hard memory bound: the process must never grow without limit. When the cap
+// is reached the OLDEST inserted entry is evicted (Map preserves insertion
+// order), which is a cheap approximation of an LRU for a short-TTL cache.
+const MAX_ENTRIES = Math.max(50, Number(process.env.CACHE_MAX_ENTRIES || 1000));
+
 // Periodic sweep so expired entries do not grow the heap forever.
 const sweep = setInterval(() => {
   const now = Date.now();
@@ -43,6 +48,10 @@ export function cacheGet(key) {
 }
 
 export function cacheSet(key, value, ttlMs = 10_000) {
+  if (store.size >= MAX_ENTRIES && !store.has(key)) {
+    const oldest = store.keys().next().value;
+    if (oldest !== undefined) store.delete(oldest);
+  }
   store.set(key, { value, expiresAt: Date.now() + ttlMs });
   return value;
 }
@@ -84,5 +93,13 @@ export function invalidate(prefix = '') {
 }
 
 export function cacheStats() {
-  return { size: store.size, hits, misses, inflight: inflight.size };
+  const total = hits + misses;
+  return {
+    size: store.size,
+    maxEntries: MAX_ENTRIES,
+    hits,
+    misses,
+    hitRate: total ? Number((hits / total).toFixed(3)) : 0,
+    inflight: inflight.size,
+  };
 }

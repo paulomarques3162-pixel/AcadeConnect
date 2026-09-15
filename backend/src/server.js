@@ -1,6 +1,7 @@
 import { createApp } from './app.js';
 import { prisma, warmupPrisma, disconnectPrisma } from './config/prisma.js';
 import { env } from './config/env.js';
+import { shutdownPasswordPool } from './utils/bcryptPool.js';
 
 const app = createApp();
 
@@ -42,6 +43,7 @@ async function shutdown(signal) {
     if (server) {
       await new Promise((resolve) => server.close(resolve));
     }
+    await shutdownPasswordPool();
     await disconnectPrisma();
   } finally {
     process.exit(0);

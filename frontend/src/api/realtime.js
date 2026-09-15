@@ -1,31 +1,43 @@
 import { api, unwrap, API_BASE_URL } from './client.js';
 
 /**
- * Singleton Server-Sent Events client.
+ * Singleton Server-Sent Events client (V9.1).
  *
- * One shared connection per browser tab. Components subscribe to the same
- * connection instead of opening their own streams or polling independently.
- * Consumers can also subscribe to connection state so their HTTP fallback
- * polling runs ONLY while SSE is unavailable.
+ * One shared connection per browser tab (instead of one per component), used by
+ * the header bell, the sidebar message badge and the conversation thread. This
+ * is what removes the recurring polling traffic.
+ *
+ * V9.1 additions:
+ *  - exposes the connection STATE (`subscribeRealtimeState` / `isRealtimeConnected`)
+ *    so the live-conversation hook only falls back to polling when the stream is
+ *    actually down, instead of polling "just in case" while SSE is healthy;
+ *  - listeners never stack: components subscribe to the same dispatcher and are
+ *    removed on unmount.
+ *
+ * If SSE is unavailable (proxy strips it, backend restarts...), the connection
+ * retries with exponential backoff and the components keep their (now slower and
+ * incremental) polling fallback, so the UI is never wrong — only slightly less
+ * instant.
  */
+
 const listeners = new Set();
-const statusListeners = new Set();
+const stateListeners = new Set();
 let es = null;
 let connecting = false;
 let reconnectTimer = null;
 let attempts = 0;
 let connected = false;
 
-function notifyStatus(next) {
-  if (connected === next) return;
-  connected = next;
-  for (const handler of statusListeners) {
+function setConnected(value) {
+  if (connected === value) return;
+  connected = value;
+  for (const handler of stateListeners) {
     try { handler(connected); } catch { /* isolate listener errors */ }
   }
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer || typeof window === 'undefined' || listeners.size === 0) return;
+  if (reconnectTimer || typeof window === 'undefined') return;
   const delay = Math.min(30_000, 2_000 * 2 ** Math.min(attempts, 4));
   attempts += 1;
   reconnectTimer = setTimeout(() => {
@@ -35,7 +47,7 @@ function scheduleReconnect() {
 }
 
 async function connect() {
-  if (connecting || es || typeof window === 'undefined' || listeners.size === 0) return;
+  if (connecting || es || typeof window === 'undefined') return;
   connecting = true;
   try {
     const res = await api.post('/realtime/token').then(unwrap);
@@ -43,42 +55,39 @@ async function connect() {
     if (!token) throw new Error('no stream token');
 
     const base = API_BASE_URL.replace(/\/$/, '');
-    const source = new EventSource(`${base}/realtime/stream?token=${encodeURIComponent(token)}`);
-    es = source;
+    es = new EventSource(`${base}/realtime/stream?token=${encodeURIComponent(token)}`);
 
-    source.onopen = () => {
+    es.onopen = () => {
       attempts = 0;
-      notifyStatus(true);
+      setConnected(true);
     };
-
-    source.onmessage = (e) => {
+    es.onmessage = (e) => {
       let evt;
       try { evt = JSON.parse(e.data); } catch { return; }
       for (const handler of listeners) {
         try { handler(evt); } catch { /* isolate listener errors */ }
       }
     };
-
-    source.onerror = () => {
-      if (es === source) es = null;
-      try { source.close(); } catch { /* ignore */ }
-      notifyStatus(false);
+    es.onerror = () => {
+      try { es.close(); } catch { /* ignore */ }
+      es = null;
+      setConnected(false);
       scheduleReconnect();
     };
   } catch {
-    notifyStatus(false);
+    setConnected(false);
     scheduleReconnect();
   } finally {
     connecting = false;
   }
 }
 
-/** Subscribe to realtime events. Returns an unsubscribe function. */
+/**
+ * Subscribe to realtime events. Returns an unsubscribe function.
+ * Opens the shared connection on the first subscriber.
+ */
 export function subscribeRealtime(handler) {
   listeners.add(handler);
-  if (connected) {
-    try { handler({ type: 'connected' }); } catch { /* isolate listener errors */ }
-  }
   connect();
   return () => {
     listeners.delete(handler);
@@ -86,15 +95,19 @@ export function subscribeRealtime(handler) {
   };
 }
 
-/** Subscribe to SSE connection state. Callback receives true/false. */
-export function subscribeRealtimeStatus(handler) {
-  statusListeners.add(handler);
-  try { handler(connected); } catch { /* isolate listener errors */ }
-  return () => statusListeners.delete(handler);
-}
-
+/** True while the shared SSE stream is open. */
 export function isRealtimeConnected() {
   return connected;
+}
+
+/**
+ * Observe the connection state. The handler is called immediately with the
+ * current value and then on every change. Returns an unsubscribe function.
+ */
+export function subscribeRealtimeState(handler) {
+  stateListeners.add(handler);
+  try { handler(connected); } catch { /* ignore */ }
+  return () => stateListeners.delete(handler);
 }
 
 export function closeRealtime() {
@@ -104,5 +117,5 @@ export function closeRealtime() {
     es = null;
   }
   attempts = 0;
-  notifyStatus(false);
+  setConnected(false);
 }

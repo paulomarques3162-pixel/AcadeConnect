@@ -1,12 +1,10 @@
-import { useEffect, useState } from 'react';
 import { Outlet, Link, NavLink, useNavigate } from 'react-router-dom';
 import { CalendarCheck, Ticket, FileText, User, LogOut, Home, ShoppingBag, Package, CreditCard, MessagesSquare, Tag, Trophy } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Logo } from '../components/Logo';
 import { useTheme } from '../context/ThemeContext';
 import { Moon, Sun } from 'lucide-react';
-import { conversationApi } from '../api/services';
-import { subscribeRealtime, subscribeRealtimeStatus } from '../api/realtime';
+import { useLiveData } from '../context/LiveDataContext';
 
 const LINKS = [
   { to: '/minha-area', label: 'Minha área', icon: Home },
@@ -25,94 +23,10 @@ export function DashboardLayout() {
   const { user, logout, isStaff } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
-  const [unreadMsgs, setUnreadMsgs] = useState(0);
-
-  useEffect(() => {
-    let active = true;
-    let fallbackTimer = null;
-    let requestTimer = null;
-    let lastRequestAt = 0;
-    let inFlight = false;
-
-    const clearFallback = () => {
-      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
-    };
-
-    const load = async () => {
-      if (!active || inFlight) return;
-      inFlight = true;
-      try {
-        const r = await conversationApi.unreadCount();
-        if (active) {
-          setUnreadMsgs(r.data?.unread || 0);
-          lastRequestAt = Date.now();
-        }
-      } catch {
-        // keep the last known badge value
-      } finally {
-        inFlight = false;
-      }
-    };
-
-    const scheduleLoad = () => {
-      if (!active || requestTimer) return;
-      requestTimer = setTimeout(() => {
-        requestTimer = null;
-        load();
-      }, 250);
-    };
-
-    const scheduleFallback = () => {
-      clearFallback();
-      if (!active || document.hidden) return;
-      fallbackTimer = setTimeout(async () => {
-        fallbackTimer = null;
-        await load();
-        scheduleFallback();
-      }, 120000);
-    };
-
-    load();
-    scheduleFallback();
-
-    const unsubscribe = subscribeRealtime((evt) => {
-      // One coalesced refresh for a burst of realtime events. Message events
-      // are intentionally ignored here because a user message already emits
-      // the corresponding notification event.
-      if (active && (evt?.type === 'conversation' || evt?.type === 'notification')) {
-        scheduleLoad();
-      }
-    });
-
-    const unsubscribeStatus = subscribeRealtimeStatus((isConnected) => {
-      if (isConnected) {
-        clearFallback();
-      } else {
-        scheduleFallback();
-      }
-    });
-
-    const onVisibility = () => {
-      if (document.hidden) {
-        clearFallback();
-        return;
-      }
-      // Only use focus/visibility as a consistency check when realtime is not
-      // connected; avoid an HTTP request every time the tab gets focus.
-      scheduleFallback();
-      if (Date.now() - lastRequestAt > 30000) scheduleLoad();
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-
-    return () => {
-      active = false;
-      clearFallback();
-      if (requestTimer) clearTimeout(requestTimer);
-      unsubscribe();
-      unsubscribeStatus();
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, []);
+  // V9.1: the badge lives in the shared live-data store. It is updated from the
+  // SSE payload (or one debounced request per burst) instead of each layout
+  // polling and re-fetching on every single event.
+  const { unreadConversations: unreadMsgs } = useLiveData();
 
   const handleLogout = async () => {
     await logout();

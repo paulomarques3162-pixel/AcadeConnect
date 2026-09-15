@@ -17,6 +17,10 @@ import couponRoutes from './coupons.routes.js';
 import orderRoutes from './orders.routes.js';
 import conversationRoutes from './conversations.routes.js';
 import realtimeRoutes from './realtime.routes.js';
+import { authenticate } from '../middlewares/auth.js';
+import * as bootstrapCtrl from '../controllers/bootstrapController.js';
+import { metricsSnapshot } from '../utils/metrics.js';
+import { env } from '../config/env.js';
 
 const router = Router();
 
@@ -25,6 +29,21 @@ const router = Router();
 router.get('/health', (_req, res) =>
   res.json({ success: true, message: 'AcadeConnect API online', data: { time: new Date().toISOString(), uptime: Math.round(process.uptime()) } })
 );
+
+// Aggregate session bootstrap (1 request instead of notifications + unread-count).
+router.get('/bootstrap', authenticate, bootstrapCtrl.bootstrap);
+
+/**
+ * Aggregate metrics (V9.2). Protected by METRICS_TOKEN when configured;
+ * otherwise available only outside production. Never exposes user data.
+ */
+router.get('/metrics', (req, res) => {
+  const allowed = env.metricsToken
+    ? req.headers['x-metrics-token'] === env.metricsToken
+    : env.nodeEnv !== 'production';
+  if (!allowed) return res.status(404).json({ success: false, message: 'Not found.' });
+  return res.json({ success: true, message: 'Métricas.', data: metricsSnapshot() });
+});
 
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);

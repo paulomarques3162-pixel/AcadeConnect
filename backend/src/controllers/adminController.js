@@ -1,6 +1,6 @@
 import { prisma } from '../config/prisma.js';
-import bcrypt from 'bcryptjs';
 import { ApiError } from '../utils/apiError.js';
+import { hashPassword } from '../utils/bcryptPool.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { publicUrl } from '../config/multer.js';
@@ -148,7 +148,7 @@ export const createUser = asyncHandler(async (req, res) => {
     data: {
       name,
       email: String(email).toLowerCase().trim(),
-      passwordHash: await bcrypt.hash(password, 12),
+      passwordHash: await hashPassword(password),
       role: role || 'PARTICIPANT',
     },
     select: { id: true, name: true, email: true, role: true },
@@ -162,7 +162,7 @@ export const updateUser = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { name, email, role, password, course, phone } = req.body;
   const data = { name, email, role, course, phone };
-  if (password) data.passwordHash = await bcrypt.hash(password, 12);
+  if (password) data.passwordHash = await hashPassword(password);
   const user = await prisma.user.update({
     where: { id },
     data,

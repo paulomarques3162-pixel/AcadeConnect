@@ -1,0 +1,1568 @@
+diff -ruN v91b/backend/.env.example v92/backend/.env.example
+--- v9.1/backend/.env.example	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/.env.example	2026-09-15 23:43:03.149723860 +0000
+@@ -24,32 +24,73 @@
+ JWT_EXPIRES_IN=7d
+ COOKIE_NAME=acadeconnect_token
+ 
+-# Rate limiting
+-# Global API limit (per IP). Health checks and OPTIONS are never counted.
+-RATE_LIMIT_WINDOW_MS=900000
++# Rate limiting (V9.2 - NAT safe)
++# The general API limit is keyed PER SESSION (hash of the bearer/cookie token),
++# so hundreds of users behind the same campus NAT do not share a budget.
++# It falls back to the IP for anonymous requests.
++RATE_LIMIT_WINDOW_MS=60000
++# Authenticated / token-bearing requests (per session bucket).
+ RATE_LIMIT_MAX=600
+-AUTH_RATE_LIMIT_MAX=20
+-# Limit for expensive endpoints (exports, certificate issuance, orders, PIX).
+-HEAVY_RATE_LIMIT_MAX=30
+-# Limit for opening realtime (SSE) streams.
+-STREAM_RATE_LIMIT_MAX=30
++# Anonymous requests fall back to an IP bucket. The whole campus may share one
++# public IP, so this ceiling is deliberately higher than the per-session one.
++RATE_LIMIT_ANON_MAX=3000
++# Failed login attempts allowed per (IP + e-mail) in 15 minutes.
++# Successful logins are NOT counted, so a whole class can sign in at once.
++AUTH_RATE_LIMIT_MAX=10
++# Coarse per-IP ceiling for /auth/login and /auth/register (login peak absorption).
++AUTH_PEAK_LIMIT_MAX=600
++# Limit for expensive endpoints (exports, certificate issuance, orders, PIX), per user.
++HEAVY_RATE_LIMIT_MAX=60
++# Limit for opening realtime (SSE) streams, per user/session.
++STREAM_RATE_LIMIT_MAX=20
+ 
+ # Database connection pool (Prisma).
+ # connection_limit: max simultaneous connections THIS process opens.
+ # Do NOT raise blindly — measure first. For a single Render instance a small
+ # pool (10) is usually far better than a large one.
+ PRISMA_CONNECTION_LIMIT=10
+-PRISMA_POOL_TIMEOUT=20
++PRISMA_POOL_TIMEOUT=10
+ PRISMA_CONNECT_TIMEOUT=10
++# Abort a socket that stops responding, so a stuck connection is recycled.
++PRISMA_SOCKET_TIMEOUT=30
+ # Set to true to log slow Prisma queries (never enable verbose logging in prod).
+ PRISMA_LOG_QUERIES=false
+ PRISMA_SLOW_QUERY_MS=100
+ 
++# PostgreSQL connection budget (IMPORTANT for 500 users)
++# Total connections the DB must accept =
++#   (number of backend instances) x PRISMA_CONNECTION_LIMIT
++#   + migrations/psql + safety margin.
++# Render's managed PostgreSQL plan defines the hard max_connections. Keep the
++# sum comfortably below it. Do NOT set connection_limit=500.
++
++# Password hashing (V9.2)
++# bcrypt cost. Keep 12 in production - never lower it just to win a benchmark.
++BCRYPT_ROUNDS=12
++# Worker threads used for bcrypt so hashing does not block the HTTP event loop.
++# 0 disables the pool (in-process fallback). Default: CPUs-1, capped at 4.
++PASSWORD_HASH_WORKERS=2
++
+ # In-memory cache TTLs (ms) for read-heavy, low-write data.
+ PUBLIC_CACHE_TTL_MS=15000
+ DASHBOARD_CACHE_TTL_MS=30000
+ # Short TTL for the authenticated user lookup done on every request.
+ AUTH_USER_CACHE_MS=5000
++# Hard cap on cached entries (LRU-ish eviction) so the heap cannot grow forever.
++CACHE_MAX_ENTRIES=1000
++
++# Observability
++# GET /api/metrics returns aggregate metrics (no user data).
++# When METRICS_TOKEN is empty the endpoint is only served outside production.
++METRICS_TOKEN=
++# Log requests slower than this (ms).
++SLOW_REQUEST_LOG_MS=1000
++
++# Load test (backend/scripts/load-test.mjs)
++LOAD_TEST_BASE_URL=http://localhost:5000/api
++LOAD_TEST_EMAIL=demo@example.com
++LOAD_TEST_PASSWORD=change-me
++LOAD_TEST_USERS=25
+ 
+ # HTTP compression (gzip) for JSON/text responses.
+ COMPRESSION_ENABLED=true
+diff -ruN v91b/backend/package.json v92/backend/package.json
+--- v9.1/backend/package.json	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/package.json	2026-09-15 23:41:55.476629984 +0000
+@@ -19,7 +19,8 @@
+     "prisma:studio": "prisma studio",
+     "prisma:push": "prisma db push",
+     "check:role": "node scripts/check-user-role.js",
+-    "set:role": "node scripts/set-user-role.js"
++    "set:role": "node scripts/set-user-role.js",
++    "loadtest": "node scripts/load-test.mjs"
+   },
+   "prisma": {
+     "seed": "node prisma/seed.js"
+diff -ruN v91b/backend/prisma/migrations/20260917000000_add_scalability_indexes/migration.sql v92/backend/prisma/migrations/20260917000000_add_scalability_indexes/migration.sql
+--- v9.1/backend/prisma/migrations/20260917000000_add_scalability_indexes/migration.sql	1970-01-01 00:00:00.000000000 +0000
++++ v9.2/backend/prisma/migrations/20260917000000_add_scalability_indexes/migration.sql	2026-09-15 23:41:07.103848087 +0000
+@@ -0,0 +1,46 @@
++-- ============================================================================
++-- AcadeConnect V9.2 - Scalability indexes (ADDITIVE, safe migration)
++--
++-- Purpose: back the composite filters/orderings used by the hot queries under
++-- concurrent load (500 users): admin listings filtered by status and ordered by
++-- date, attendance/roster lookups, certificate listing, inbox ordering, store
++-- orders and payments.
++--
++-- Safety: INDEX ONLY.
++--   * No DROP, no TRUNCATE, no DELETE, no column/table change.
++--   * Every statement uses CREATE INDEX IF NOT EXISTS -> idempotent.
++--   * Safe to run with `prisma migrate deploy` against a populated database.
++--
++-- Existing single-column indexes are intentionally NOT removed: this migration
++-- only ever adds. (A composite index also serves its leftmost column, so a few
++-- single-column indexes become redundant; removing them is a separate, optional
++-- cleanup and is documented in the V9.2 report.)
++-- ============================================================================
++
++-- User: admin listing filtered by role, excluding soft-deleted accounts
++CREATE INDEX IF NOT EXISTS "User_role_deletedAt_idx" ON "User"("role", "deletedAt");
++
++-- Event: "upcoming/current" listings (status filter + date ordering)
++CREATE INDEX IF NOT EXISTS "Event_status_startDate_idx" ON "Event"("status", "startDate");
++
++-- Activity: schedule per event filtered by status
++CREATE INDEX IF NOT EXISTS "Activity_eventId_status_idx" ON "Activity"("eventId", "status");
++
++-- Registration: "my active registrations" and admin listing by status+date
++CREATE INDEX IF NOT EXISTS "Registration_userId_status_idx" ON "Registration"("userId", "status");
++CREATE INDEX IF NOT EXISTS "Registration_status_createdAt_idx" ON "Registration"("status", "createdAt");
++
++-- Attendance: roster/status filters and per-event presence counts
++CREATE INDEX IF NOT EXISTS "Attendance_activityId_status_idx" ON "Attendance"("activityId", "status");
++CREATE INDEX IF NOT EXISTS "Attendance_eventId_status_idx" ON "Attendance"("eventId", "status");
++
++-- Certificate: admin listing by event+status and dashboard group-by status
++CREATE INDEX IF NOT EXISTS "Certificate_eventId_status_idx" ON "Certificate"("eventId", "status");
++CREATE INDEX IF NOT EXISTS "Certificate_status_idx" ON "Certificate"("status");
++
++-- Conversation: staff inbox ordered by last message within a status
++CREATE INDEX IF NOT EXISTS "Conversation_status_lastMessageAt_idx" ON "Conversation"("status", "lastMessageAt");
++
++-- Order / Payment: admin listings filtered by status and ordered by date
++CREATE INDEX IF NOT EXISTS "Order_status_createdAt_idx" ON "Order"("status", "createdAt");
++CREATE INDEX IF NOT EXISTS "Payment_status_createdAt_idx" ON "Payment"("status", "createdAt");
+diff -ruN v91b/backend/prisma/schema.prisma v92/backend/prisma/schema.prisma
+--- v9.1/backend/prisma/schema.prisma	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/prisma/schema.prisma	2026-09-15 23:41:15.771988195 +0000
+@@ -185,6 +185,7 @@
+   @@index([email])
+   @@index([role])
+ @@index([createdAt])
++@@index([role, deletedAt])
+ }
+ 
+ model Event {
+@@ -237,6 +238,7 @@
+ @@index([deletedAt, status])
+ @@index([deletedAt, createdAt])
+ @@index([startDate])
++@@index([status, startDate])
+ }
+ 
+ model Speaker {
+@@ -286,6 +288,7 @@
+   @@index([eventId])
+   @@index([date])
+ @@index([eventId, date])
++@@index([eventId, status])
+ }
+ 
+ model Registration {
+@@ -314,6 +317,8 @@
+ @@index([eventId, status])
+ @@index([createdAt])
+ @@index([eventId, createdAt])
++@@index([userId, status])
++@@index([status, createdAt])
+ }
+ 
+ model ActivityRegistration {
+@@ -352,6 +357,8 @@
+   @@index([userId])
+ @@index([eventId])
+ @@index([eventId, recordedAt])
++@@index([activityId, status])
++@@index([eventId, status])
+ }
+ 
+ model Certificate {
+@@ -390,6 +397,8 @@
+   @@index([code])
+ @@index([eventId])
+ @@index([userId, issueDate])
++@@index([eventId, status])
++@@index([status])
+ }
+ 
+ model Notification {
+@@ -482,6 +491,7 @@
+ @@index([status, expiresAt])
+ @@index([createdAt])
+ @@index([userId, createdAt])
++@@index([status, createdAt])
+ }
+ 
+ // ============================================================
+@@ -552,6 +562,7 @@
+   @@index([status])
+ @@index([createdAt])
+ @@index([userId, createdAt])
++@@index([status, createdAt])
+ }
+ 
+ model OrderItem {
+@@ -591,6 +602,7 @@
+   @@index([status])
+ @@index([lastMessageAt])
+ @@index([userId, lastMessageAt])
++@@index([status, lastMessageAt])
+ }
+ 
+ model Message {
+diff -ruN v91b/backend/scripts/load-test.mjs v92/backend/scripts/load-test.mjs
+--- v9.1/backend/scripts/load-test.mjs	1970-01-01 00:00:00.000000000 +0000
++++ v9.2/backend/scripts/load-test.mjs	2026-09-15 23:41:51.668568431 +0000
+@@ -0,0 +1,320 @@
++#!/usr/bin/env node
++/**
++ * AcadeConnect V9.2 - load test.
++ *
++ * Dependency-free (uses the built-in fetch). Runs progressively so a spike can
++ * be observed before going to production:
++ *
++ *   node scripts/load-test.mjs --scenario login    --levels 25,50,100
++ *   node scripts/load-test.mjs --scenario navigate --levels 25,50,100,250
++ *   node scripts/load-test.mjs --scenario events   --levels 100,250,500
++ *   node scripts/load-test.mjs --scenario realtime --levels 50,100
++ *   node scripts/load-test.mjs --scenario messages --levels 50,100
++ *
++ * Always start small (25/50) and increase. NEVER jump straight to 500 in
++ * production. Read RELATORIO_ESCALABILIDADE_V9_2.md before running.
++ *
++ * Credentials: the script needs real accounts.
++ *   - LOAD_TEST_EMAIL / LOAD_TEST_PASSWORD                         (single account)
++ *   - LOAD_TEST_EMAIL_TEMPLATE="load{i}@example.com" + password    (one per VU)
++ * Creating the accounts is the operator's responsibility; nothing here writes
++ * user data (except scenario `register`, which is opt-in and requires --allow-write).
++ *
++ * Exit code is 0 even with errors; inspect the report. It is a diagnostic tool,
++ * not a pass/fail gate.
++ */
++
++import { performance } from 'node:perf_hooks';
++import fs from 'node:fs';
++import path from 'node:path';
++
++// ---------------------------------------------------------------- config -----
++
++function arg(name, fallback = undefined) {
++  const idx = process.argv.indexOf(`--${name}`);
++  if (idx === -1) return fallback;
++  const value = process.argv[idx + 1];
++  return value === undefined || value.startsWith('--') ? true : value;
++}
++
++const cfg = {
++  base: String(arg('base', process.env.LOAD_TEST_BASE_URL || 'http://localhost:5000/api')).replace(/\/$/, ''),
++  scenario: String(arg('scenario', process.env.LOAD_TEST_SCENARIO || 'login')),
++  levels: String(arg('levels', process.env.LOAD_TEST_LEVELS || '25'))
++    .split(',')
++    .map((v) => Number(v.trim()))
++    .filter((n) => Number.isFinite(n) && n > 0),
++  email: arg('email', process.env.LOAD_TEST_EMAIL || ''),
++  template: arg('template', process.env.LOAD_TEST_EMAIL_TEMPLATE || ''),
++  password: arg('password', process.env.LOAD_TEST_PASSWORD || ''),
++  timeoutMs: Number(arg('timeout', process.env.LOAD_TEST_TIMEOUT_MS || 30000)),
++  holdMs: Number(arg('hold', process.env.LOAD_TEST_HOLD_MS || 10000)),
++  allowWrite: Boolean(arg('allow-write', false)),
++  registerEventId: arg('event', process.env.LOAD_TEST_EVENT_ID || ''),
++  out: arg('out', ''),
++};
++
++const emailFor = (i) => (cfg.template ? cfg.template.replace('{i}', String(i)) : cfg.email);
++
++// ---------------------------------------------------------------- helpers -----
++
++function percentile(sorted, p) {
++  if (sorted.length === 0) return 0;
++  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
++  return Number(sorted[idx].toFixed(1));
++}
++
++function summarize(samples) {
++  const ok = samples.filter((s) => s.status >= 200 && s.status < 300).length;
++  const clientErr = samples.filter((s) => s.status >= 400 && s.status < 500).length;
++  const serverErr = samples.filter((s) => s.status >= 500).length;
++  const networkErr = samples.filter((s) => s.status === 0).length;
++  const durations = samples.map((s) => s.ms).sort((a, b) => a - b);
++  const total = durations.reduce((a, b) => a + b, 0);
++  const wall = samples.length ? Math.max(...samples.map((s) => s.end)) - Math.min(...samples.map((s) => s.start)) : 0;
++  return {
++    requests: samples.length,
++    ok,
++    clientErr,
++    serverErr,
++    networkErr,
++    errorRate: samples.length ? Number((((samples.length - ok) / samples.length) * 100).toFixed(1)) : 0,
++    rps: wall > 0 ? Number((samples.length / (wall / 1000)).toFixed(1)) : 0,
++    avgMs: samples.length ? Number((total / samples.length).toFixed(1)) : 0,
++    p50: percentile(durations, 50),
++    p95: percentile(durations, 95),
++    p99: percentile(durations, 99),
++    maxMs: durations.length ? Number(durations[durations.length - 1].toFixed(1)) : 0,
++  };
++}
++
++async function timed(label, fn) {
++  const start = performance.now();
++  let status = 0;
++  try {
++    const res = await fn();
++    status = res?.status ?? 200;
++    return { label, status, ms: performance.now() - start, start, end: performance.now(), body: res?.body };
++  } catch {
++    return { label, status: 0, ms: performance.now() - start, start, end: performance.now(), body: null };
++  }
++}
++
++async function request(pathname, { method = 'GET', token = null, body = null } = {}) {
++  const controller = new AbortController();
++  const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
++  try {
++    const res = await fetch(`${cfg.base}${pathname}`, {
++      method,
++      headers: {
++        ...(body ? { 'Content-Type': 'application/json' } : {}),
++        ...(token ? { Authorization: `Bearer ${token}` } : {}),
++      },
++      ...(body ? { body: JSON.stringify(body) } : {}),
++      signal: controller.signal,
++    });
++    let parsed = null;
++    try {
++      parsed = await res.json();
++    } catch {
++      parsed = null;
++    }
++    return { status: res.status, body: parsed };
++  } finally {
++    clearTimeout(timer);
++  }
++}
++
++/** Run `total` tasks with at most `concurrency` in flight. */
++async function runPool(total, concurrency, worker) {
++  let next = 0;
++  const tasks = new Array(Math.min(concurrency, total)).fill(0).map(async () => {
++    // eslint-disable-next-line no-constant-condition
++    while (true) {
++      const i = next;
++      next += 1;
++      if (i >= total) return;
++      // eslint-disable-next-line no-await-in-loop
++      await worker(i);
++    }
++  });
++  await Promise.all(tasks);
++}
++
++const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
++
++// -------------------------------------------------------------- scenarios -----
++
++async function scenarioLogin(level) {
++  const samples = [];
++  await runPool(level, level, async (i) => {
++    const s = await timed('login', () =>
++      request('/auth/login', { method: 'POST', body: { email: emailFor(i), password: cfg.password } })
++    );
++    samples.push(s);
++  });
++  return { samples };
++}
++
++async function scenarioEvents(level) {
++  const samples = [];
++  await runPool(level, level, async (i) => {
++    samples.push(await timed('list-events', () => request('/events?limit=12')));
++    const detailId = samples[samples.length - 1]?.body?.data?.events?.[0]?.slug;
++    if (detailId) samples.push(await timed('event-detail', () => request(`/events/${detailId}`)));
++    if (i % 3 === 0) samples.push(await timed('home-events', () => request('/events?limit=3&status=OPEN')));
++  });
++  return { samples };
++}
++
++async function scenarioNavigate(level) {
++  const samples = [];
++  await runPool(level, level, async (i) => {
++    const login = await timed('login', () =>
++      request('/auth/login', { method: 'POST', body: { email: emailFor(i), password: cfg.password } })
++    );
++    samples.push(login);
++    const token = login.body?.data?.token;
++    if (!token) return;
++    samples.push(await timed('bootstrap', () => request('/bootstrap', { token })));
++    samples.push(await timed('list-events', () => request('/events?limit=12', { token })));
++    samples.push(await timed('my-area', () => request('/registrations/me', { token })));
++    samples.push(await timed('auth-me', () => request('/auth/me', { token })));
++  });
++  return { samples };
++}
++
++async function scenarioRealtime(level) {
++  const samples = [];
++  const sockets = [];
++  await runPool(level, Math.min(level, 100), async (i) => {
++    const login = await timed('login', () =>
++      request('/auth/login', { method: 'POST', body: { email: emailFor(i), password: cfg.password } })
++    );
++    samples.push(login);
++    const token = login.body?.data?.token;
++    if (!token) return;
++    const tok = await timed('realtime-token', () => request('/realtime/token', { method: 'POST', token }));
++    samples.push(tok);
++    const streamToken = tok.body?.data?.token;
++    if (!streamToken) return;
++    const open = await timed('sse-open', async () => {
++      const controller = new AbortController();
++      const res = await fetch(`${cfg.base}/realtime/stream?token=${encodeURIComponent(streamToken)}`, {
++        headers: { Accept: 'text/event-stream' },
++        signal: controller.signal,
++      });
++      sockets.push(controller);
++      return { status: res.status };
++    });
++    samples.push(open);
++  });
++  // Hold the connections open so the server-side SSE count is realistic.
++  await sleep(cfg.holdMs);
++  const openErrors = sockets.filter((s) => s.signal.aborted).length;
++  for (const s of sockets) s.abort();
++  return { samples, notes: [`SSE connections held: ${sockets.length}`, `aborted early: ${openErrors}`] };
++}
++
++async function scenarioMessages(level) {
++  const samples = [];
++  await runPool(level, level, async (i) => {
++    const login = await timed('login', () =>
++      request('/auth/login', { method: 'POST', body: { email: emailFor(i), password: cfg.password } })
++    );
++    samples.push(login);
++    const token = login.body?.data?.token;
++    if (!token) return;
++    for (let round = 0; round < 3; round += 1) {
++      // eslint-disable-next-line no-await-in-loop
++      samples.push(await timed('unread-count', () => request('/conversations/unread-count', { token })));
++      // eslint-disable-next-line no-await-in-loop
++      samples.push(await timed('notifications', () => request('/notifications?limit=8', { token })));
++    }
++  });
++  return { samples };
++}
++
++async function scenarioRegister(level) {
++  if (!cfg.allowWrite) {
++    console.log('⚠️  Scenario "register" writes data and is disabled by default.');
++    console.log('    Re-run with --allow-write --event <eventId> against a TEST event.');
++    return { samples: [], notes: ['skipped (no --allow-write)'] };
++  }
++  if (!cfg.registerEventId) {
++    console.log('⚠️  Scenario "register" requires --event <eventId>.');
++    return { samples: [], notes: ['skipped (no --event)'] };
++  }
++  const samples = [];
++  await runPool(level, level, async (i) => {
++    const login = await timed('login', () =>
++      request('/auth/login', { method: 'POST', body: { email: emailFor(i), password: cfg.password } })
++    );
++    samples.push(login);
++    const token = login.body?.data?.token;
++    if (!token) return;
++    samples.push(
++      await timed('register', () =>
++        request(`/registrations/${cfg.registerEventId}`, { method: 'POST', token, body: { activityIds: [] } })
++      )
++    );
++  });
++  return { samples, notes: ['TEST DATA WRITTEN - clean up the test event manually'] };
++}
++
++const SCENARIOS = {
++  login: scenarioLogin,
++  navigate: scenarioNavigate,
++  events: scenarioEvents,
++  realtime: scenarioRealtime,
++  messages: scenarioMessages,
++  register: scenarioRegister,
++};
++
++// ------------------------------------------------------------------- main -----
++
++async function main() {
++  if (!SCENARIOS[cfg.scenario]) {
++    console.error(`Unknown scenario "${cfg.scenario}". Use one of: ${Object.keys(SCENARIOS).join(', ')}`);
++    process.exit(2);
++  }
++  if (cfg.scenario !== 'events' && (!emailFor(0) || !cfg.password)) {
++    console.error('Missing credentials: set LOAD_TEST_EMAIL/LOAD_TEST_PASSWORD (or LOAD_TEST_EMAIL_TEMPLATE).');
++    process.exit(2);
++  }
++
++  console.log('AcadeConnect V9.2 load test');
++  console.log(`  base      : ${cfg.base}`);
++  console.log(`  scenario  : ${cfg.scenario}`);
++  console.log(`  levels    : ${cfg.levels.join(', ')}`);
++  console.log(`  credentials: ${cfg.template ? `template ${cfg.template}` : cfg.email || '(anonymous)'}`);
++  console.log('');
++
++  const results = [];
++  for (const level of cfg.levels) {
++    process.stdout.write(`▶ ${cfg.scenario} @ ${level} concurrent... `);
++    // eslint-disable-next-line no-await-in-loop
++    const { samples, notes = [] } = await SCENARIOS[cfg.scenario](level);
++    const summary = summarize(samples);
++    results.push({ scenario: cfg.scenario, concurrency: level, summary, notes });
++    console.log('done');
++    console.log(
++      `   requests=${summary.requests} ok=${summary.ok} 4xx=${summary.clientErr} 5xx=${summary.serverErr} ` +
++        `net=${summary.networkErr} rps=${summary.rps} p50=${summary.p50}ms p95=${summary.p95}ms p99=${summary.p99}ms max=${summary.maxMs}ms`
++    );
++    for (const note of notes) console.log(`   note: ${note}`);
++    console.log('');
++    if (level !== cfg.levels[cfg.levels.length - 1]) await sleep(3000); // let the server/db settle
++  }
++
++  const payload = { generatedAt: new Date().toISOString(), config: { ...cfg, password: undefined }, results };
++  const outPath = cfg.out || path.join(process.cwd(), `load-test-${cfg.scenario}-${Date.now()}.json`);
++  fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
++  console.log(`Report written to ${outPath}`);
++  console.log('Interpretation: keep an eye on p95/p99 and 5xx. Rising latency with growing concurrency = a bottleneck.');
++}
++
++main().catch((err) => {
++  console.error('Load test failed:', err);
++  process.exit(1);
++});
+diff -ruN v91b/backend/src/app.js v92/backend/src/app.js
+--- v9.1/backend/src/app.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/app.js	2026-09-15 23:40:35.691340339 +0000
+@@ -8,6 +8,7 @@
+ import { apiLimiter } from './middlewares/rateLimiter.js';
+ import { notFound } from './middlewares/notFound.js';
+ import { errorHandler } from './middlewares/errorHandler.js';
++import { observability } from './middlewares/observability.js';
+ import routes from './routes/index.js';
+ 
+ export function createApp() {
+@@ -56,6 +57,10 @@
+   app.use(express.urlencoded({ extended: true }));
+   app.use(cookieParser());
+ 
++  // Request id + latency/error metrics. Runs before the rate limiter so even
++  // 429 responses are measured and carry a correlation id.
++  app.use(observability);
++
+   // Rate limiting on the whole API (health + OPTIONS skipped inside the limiter).
+   app.use('/api', apiLimiter);
+ 
+diff -ruN v91b/backend/src/config/env.js v92/backend/src/config/env.js
+--- v9.1/backend/src/config/env.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/config/env.js	2026-09-15 23:43:03.149723860 +0000
+@@ -30,13 +30,34 @@
+   uploadDir: process.env.UPLOAD_DIR || 'uploads',
+   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 5),
+ 
+-  rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
++  // Rate limiting (V9.2): the general limit is keyed per SESSION (token hash),
++  // so hundreds of users behind one campus NAT do not share a budget.
++  rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60 * 1000),
+   rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 600),
+-  authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 20),
++  // Anonymous requests share a public IP (whole campus/NAT), so the IP ceiling
++  // must be much higher than the per-session ceiling.
++  rateLimitAnonMax: Number(process.env.RATE_LIMIT_ANON_MAX || 3000),
++  // Failed login attempts allowed per (IP + e-mail) in 15 min. Successful
++  // logins are never counted, so a whole class can sign in simultaneously.
++  authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 10),
++  // Coarse per-IP ceiling for the auth routes (absorbs legitimate login waves).
++  authPeakLimitMax: Number(process.env.AUTH_PEAK_LIMIT_MAX || 600),
++  heavyRateLimitMax: Number(process.env.HEAVY_RATE_LIMIT_MAX || 60),
++  streamRateLimitMax: Number(process.env.STREAM_RATE_LIMIT_MAX || 20),
+ 
+   // In-memory cache TTL (ms) for read-heavy, low-write public data.
+   publicCacheTtlMs: Number(process.env.PUBLIC_CACHE_TTL_MS || 15000),
+   dashboardCacheTtlMs: Number(process.env.DASHBOARD_CACHE_TTL_MS || 30000),
++  cacheMaxEntries: Number(process.env.CACHE_MAX_ENTRIES || 1000),
++
++  // Password hashing: bcrypt cost (never lower it to win a benchmark) and the
++  // worker-thread pool that keeps the hashing off the HTTP event loop.
++  bcryptRounds: Number(process.env.BCRYPT_ROUNDS || 12),
++  passwordHashWorkers: process.env.PASSWORD_HASH_WORKERS ?? null,
++
++  // Protected metrics endpoint (JSON). When unset, /api/metrics is only served
++  // outside production.
++  metricsToken: process.env.METRICS_TOKEN || null,
+ 
+   // HTTP compression threshold (bytes) and toggle.
+   compressionEnabled: parseBool(process.env.COMPRESSION_ENABLED, true),
+diff -ruN v91b/backend/src/config/prisma.js v92/backend/src/config/prisma.js
+--- v9.1/backend/src/config/prisma.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/config/prisma.js	2026-09-15 23:40:46.303511870 +0000
+@@ -27,8 +27,12 @@
+   if (!rawUrl) return rawUrl;
+   const defaults = {
+     connection_limit: process.env.PRISMA_CONNECTION_LIMIT || '10',
+-    pool_timeout: process.env.PRISMA_POOL_TIMEOUT || '20',
++    // Seconds a request waits for a free connection before failing. 20s is too
++    // long under load (requests pile up). Fail fast so the client can retry.
++    pool_timeout: process.env.PRISMA_POOL_TIMEOUT || '10',
+     connect_timeout: process.env.PRISMA_CONNECT_TIMEOUT || '10',
++    // Abort a socket that stops responding so a stuck connection is recycled.
++    socket_timeout: process.env.PRISMA_SOCKET_TIMEOUT || '30',
+   };
+   try {
+     const href = /^postgres(ql)?:\/\//.test(rawUrl) ? rawUrl : rawUrl;
+diff -ruN v91b/backend/src/controllers/adminController.js v92/backend/src/controllers/adminController.js
+--- v9.1/backend/src/controllers/adminController.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/controllers/adminController.js	2026-09-15 23:40:00.806776462 +0000
+@@ -1,6 +1,6 @@
+ import { prisma } from '../config/prisma.js';
+-import bcrypt from 'bcryptjs';
+ import { ApiError } from '../utils/apiError.js';
++import { hashPassword } from '../utils/bcryptPool.js';
+ import { apiResponse } from '../utils/apiResponse.js';
+ import { asyncHandler } from '../utils/asyncHandler.js';
+ import { publicUrl } from '../config/multer.js';
+@@ -148,7 +148,7 @@
+     data: {
+       name,
+       email: String(email).toLowerCase().trim(),
+-      passwordHash: await bcrypt.hash(password, 12),
++      passwordHash: await hashPassword(password),
+       role: role || 'PARTICIPANT',
+     },
+     select: { id: true, name: true, email: true, role: true },
+@@ -162,7 +162,7 @@
+   const { id } = req.params;
+   const { name, email, role, password, course, phone } = req.body;
+   const data = { name, email, role, course, phone };
+-  if (password) data.passwordHash = await bcrypt.hash(password, 12);
++  if (password) data.passwordHash = await hashPassword(password);
+   const user = await prisma.user.update({
+     where: { id },
+     data,
+diff -ruN v91b/backend/src/controllers/authController.js v92/backend/src/controllers/authController.js
+--- v9.1/backend/src/controllers/authController.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/controllers/authController.js	2026-09-15 23:40:00.806776462 +0000
+@@ -1,6 +1,6 @@
+-import bcrypt from 'bcryptjs';
+ import { prisma } from '../config/prisma.js';
+ import { env } from '../config/env.js';
++import { hashPassword, verifyPassword } from '../utils/bcryptPool.js';
+ import { ApiError } from '../utils/apiError.js';
+ import { apiResponse } from '../utils/apiResponse.js';
+ import { asyncHandler } from '../utils/asyncHandler.js';
+@@ -32,7 +32,7 @@
+   const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+   if (existing) throw new ApiError(409, 'Já existe uma conta com este e-mail.');
+ 
+-  const passwordHash = await bcrypt.hash(password, 12);
++  const passwordHash = await hashPassword(password);
+   // Segurança: o auto-cadastro NUNCA define papel privilegiado. Antes, enviar
+   // { role: 'ORGANIZER' } no corpo da requisição criava uma conta com acesso ao
+   // painel administrativo (escalação de privilégio). ADMIN/ORGANIZER só podem
+@@ -81,10 +81,11 @@
+   const normalizedEmail = String(email).toLowerCase().trim();
+ 
+   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+-  if (!user || user.deletedAt) throw new ApiError(401, 'Credenciais inválidas.');
+-
+-  const valid = await bcrypt.compare(password, user.passwordHash);
+-  if (!valid) throw new ApiError(401, 'Credenciais inválidas.');
++  // Always run a comparison even when the user does not exist, so response time
++  // does not reveal whether an email is registered (user enumeration timing).
++  const storedHash = user?.passwordHash || '$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidinv';
++  const valid = await verifyPassword(password, storedHash);
++  if (!user || user.deletedAt || !valid) throw new ApiError(401, 'Credenciais inválidas.');
+ 
+   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+ 
+@@ -147,7 +148,7 @@
+   }
+   if (payload.type !== 'password_reset') throw new ApiError(400, 'Link de recuperação inválido.');
+ 
+-  const passwordHash = await bcrypt.hash(password, 12);
++  const passwordHash = await hashPassword(password);
+   await prisma.user.update({ where: { id: payload.sub }, data: { passwordHash } });
+   await createAuditLog({ userId: payload.sub, action: 'PASSWORD_RESET', resource: 'User', resourceId: payload.sub });
+   return apiResponse(res, { message: 'Senha redefinida com sucesso. Faça login.' });
+@@ -156,8 +157,8 @@
+ export const changePassword = asyncHandler(async (req, res) => {
+   const { currentPassword, newPassword } = req.body;
+   const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+-  const valid = await bcrypt.compare(currentPassword, user.passwordHash);
++  const valid = await verifyPassword(currentPassword, user.passwordHash);
+   if (!valid) throw new ApiError(400, 'Senha atual incorreta.');
+-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(newPassword, 12) } });
++  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(newPassword) } });
+   return apiResponse(res, { message: 'Senha alterada com sucesso.' });
+ });
+diff -ruN v91b/backend/src/controllers/bootstrapController.js v92/backend/src/controllers/bootstrapController.js
+--- v9.1/backend/src/controllers/bootstrapController.js	1970-01-01 00:00:00.000000000 +0000
++++ v9.2/backend/src/controllers/bootstrapController.js	2026-09-15 23:40:56.151671053 +0000
+@@ -0,0 +1,39 @@
++import { prisma } from '../config/prisma.js';
++import { apiResponse } from '../utils/apiResponse.js';
++import { asyncHandler } from '../utils/asyncHandler.js';
++import { publicUrl } from '../config/multer.js';
++import { unreadCount as unreadConversationCount } from '../services/conversationService.js';
++
++const NOTIFICATION_PREVIEW = 8;
++
++/**
++ * V9.2 — one request to initialize an authenticated session.
++ *
++ * Before this endpoint, a freshly logged-in tab fired GET /notifications AND
++ * GET /conversations/unread-count right away. During a login peak that doubles
++ * the post-login query wave. Aggregating the three cheap reads into a single
++ * response removes one full round-trip per user with no change to the API
++ * contract used by the rest of the app (the individual endpoints remain).
++ */
++export const bootstrap = asyncHandler(async (req, res) => {
++  const userId = req.user.id;
++  const [notifications, unreadNotifications, unreadConversations] = await Promise.all([
++    prisma.notification.findMany({
++      where: { userId },
++      orderBy: { createdAt: 'desc' },
++      take: NOTIFICATION_PREVIEW,
++    }),
++    prisma.notification.count({ where: { userId, read: false } }),
++    unreadConversationCount(req.user),
++  ]);
++
++  return apiResponse(res, {
++    message: 'Sessão inicializada.',
++    data: {
++      user: { ...req.user, avatarUrl: publicUrl(req.user.avatarUrl) },
++      notifications,
++      unreadNotifications,
++      unreadConversations,
++    },
++  });
++});
+diff -ruN v91b/backend/src/controllers/realtimeController.js v92/backend/src/controllers/realtimeController.js
+--- v9.1/backend/src/controllers/realtimeController.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/controllers/realtimeController.js	2026-09-15 23:40:39.191396914 +0000
+@@ -2,6 +2,7 @@
+ import { subscribeUser } from '../services/realtime.js';
+ import { apiResponse } from '../utils/apiResponse.js';
+ import { asyncHandler } from '../utils/asyncHandler.js';
++import { sseOpened, sseClosed } from '../utils/metrics.js';
+ 
+ /**
+  * Issue a SHORT-LIVED token used only to open the SSE stream.
+@@ -37,6 +38,7 @@
+   };
+ 
+   write({ type: 'connected', at: Date.now() });
++  sseOpened();
+ 
+   const unsubscribe = subscribeUser(req.user.id, write);
+ 
+@@ -50,8 +52,12 @@
+   }, 25_000);
+   if (ping.unref) ping.unref();
+ 
++  let closed = false;
+   req.on('close', () => {
++    if (closed) return;
++    closed = true;
+     clearInterval(ping);
+     unsubscribe();
++    sseClosed();
+   });
+ });
+diff -ruN v91b/backend/src/middlewares/errorHandler.js v92/backend/src/middlewares/errorHandler.js
+--- v9.1/backend/src/middlewares/errorHandler.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/middlewares/errorHandler.js	2026-09-15 23:40:46.303511870 +0000
+@@ -19,19 +19,33 @@
+     } else if (err.code === 'P2025') {
+       statusCode = 404;
+       message = 'Registro não encontrado.';
++    } else if (err.code === 'P2024') {
++      // Connection-pool timeout: the database is saturated. Answer 503 + Retry
++      // instead of 500, so clients/load-balancers back off correctly.
++      statusCode = 503;
++      message = 'Serviço temporariamente sobrecarregado. Tente novamente em instantes.';
+     } else {
+       statusCode = 400;
+       message = 'Erro no banco de dados.';
+     }
++  } else if (
++    err instanceof Prisma.PrismaClientInitializationError ||
++    err?.code === 'P1001' ||
++    err?.code === 'P1002' ||
++    err?.code === 'P1017'
++  ) {
++    // Cannot reach / lost the database: transient, retryable.
++    statusCode = 503;
++    message = 'Serviço temporariamente indisponível. Tente novamente em instantes.';
+   } else if (err instanceof Prisma.PrismaClientValidationError) {
+     statusCode = 422;
+     message = 'Dados inválidos enviados ao banco.';
+   }
+ 
+   if (err instanceof ApiError === false && statusCode === 500) {
+-    // Log unexpected errors server-side, respond generically.
++    // Log unexpected errors server-side (with the correlation id), respond generically.
+     // eslint-disable-next-line no-console
+-    console.error('[Unhandled error]', err);
++    console.error(`[Unhandled error] req=${_req.id || '-'}`, err);
+     message = 'Erro interno do servidor.';
+   }
+ 
+@@ -40,9 +54,12 @@
+     console.error(err);
+   }
+ 
++  if (statusCode === 503) res.setHeader('Retry-After', '2');
++
+   return res.status(statusCode).json({
+     success: false,
+     message,
+     ...(details ? { details } : {}),
++    ...(_req.id ? { requestId: _req.id } : {}),
+   });
+ }
+diff -ruN v91b/backend/src/middlewares/observability.js v92/backend/src/middlewares/observability.js
+--- v9.1/backend/src/middlewares/observability.js	1970-01-01 00:00:00.000000000 +0000
++++ v9.2/backend/src/middlewares/observability.js	2026-09-15 23:40:20.115088559 +0000
+@@ -0,0 +1,43 @@
++import crypto from 'node:crypto';
++import { recordRequest } from '../utils/metrics.js';
++
++/**
++ * V9.2 — request id + latency/error observability.
++ *
++ * Adds a correlation id to every request (honouring an upstream X-Request-Id),
++ * echoes it back, records aggregate metrics and logs only slow or failing
++ * requests. It never logs bodies, tokens or personal data.
++ */
++
++const SLOW_REQUEST_MS = Number(process.env.SLOW_REQUEST_LOG_MS || 1000);
++
++function normalizeRoute(req) {
++  if (req.route?.path) return `${req.baseUrl || ''}${req.route.path}`;
++  if (req.baseUrl) return `${req.baseUrl}/*`;
++  // Unmatched path: collapse ids so metrics cannot explode in cardinality.
++  return (req.path || '/').replace(/\/[A-Za-z0-9_-]{8,}/g, '/:id');
++}
++
++export function observability(req, res, next) {
++  const headerId = req.headers['x-request-id'];
++  const id = typeof headerId === 'string' && headerId.length <= 100 ? headerId : crypto.randomUUID();
++  req.id = id;
++  res.setHeader('X-Request-Id', id);
++
++  const start = process.hrtime.bigint();
++
++  res.on('finish', () => {
++    const durationMs = Number(process.hrtime.bigint() - start) / 1e6;
++    const route = normalizeRoute(req);
++    recordRequest({ method: req.method, route, status: res.statusCode, durationMs });
++
++    if (res.statusCode >= 500 || durationMs >= SLOW_REQUEST_MS) {
++      // eslint-disable-next-line no-console
++      console.log(
++        `[http] ${req.method} ${route} -> ${res.statusCode} in ${durationMs.toFixed(0)}ms req=${id}`
++      );
++    }
++  });
++
++  next();
++}
+diff -ruN v91b/backend/src/middlewares/rateLimiter.js v92/backend/src/middlewares/rateLimiter.js
+--- v9.1/backend/src/middlewares/rateLimiter.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/middlewares/rateLimiter.js	2026-09-15 23:43:03.149723860 +0000
+@@ -1,55 +1,131 @@
+ import rateLimit from 'express-rate-limit';
++import crypto from 'node:crypto';
+ import { env } from '../config/env.js';
+ 
+ const tooMany = (message) => ({ success: false, message });
+ 
++const sha16 = (value) => crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 16);
++
++/**
++ * V9.2 — NAT-safe rate limiting.
++ *
++ * The previous limits were keyed by IP. That is dangerous for this deployment:
++ * a whole campus/atletica network usually shares ONE public IP, so a global
++ * "600 requests / 15min per IP" blocked hundreds of legitimate participants at
++ * the same time (and "20 logins / 15min per IP" blocked a class logging in
++ * together).
++ *
++ * New strategy:
++ *  - Any request that carries a session token gets its OWN bucket (hash of the
++ *    token; we never store the token itself). Many users behind one NAT no
++ *    longer consume a shared budget.
++ *  - Anonymous requests fall back to the IP bucket, still bounded against floods.
++ *  - Login/registration brute-force is limited per (IP + email), and only FAILED
++ *    attempts count, so legitimate simultaneous logins never consume the quota.
++ *  - A generous per-IP "peak" limiter absorbs spikes while still stopping abuse.
++ */
++
++/** Authenticated/token-bearing requests get a per-session bucket. */
++function sessionKey(req) {
++  const header = req.headers.authorization;
++  if (header && header.startsWith('Bearer ')) return `s:${sha16(header.slice(7).trim())}`;
++  const cookie = req.cookies?.[env.cookieName];
++  if (cookie) return `s:${sha16(cookie)}`;
++  return `ip:${req.ip}`;
++}
++
++/** Per-user bucket when the route already authenticated the request. */
++function userKey(req) {
++  return req.user?.id ? `u:${req.user.id}` : sessionKey(req);
++}
++
++/** Login/registration brute-force bucket: IP + email (never blocks other users). */
++function emailIpKey(req) {
++  const email = String(req.body?.email || '').trim().toLowerCase();
++  return `${req.ip}|${email ? sha16(email) : 'anon'}`;
++}
++
++const skipNonBusiness = (req) => req.method === 'OPTIONS' || req.path === '/health' || req.path === '/health/';
++
++const hasSession = (req) =>
++  Boolean(req.headers.authorization?.startsWith('Bearer ') || req.cookies?.[env.cookieName]);
++
+ /**
+- * General API rate limit.
++ * General API limit.
+  *
+- * Raised default (600 / 15min) so that many legitimate participants behind the
+- * same NAT/campus network are not blocked, while still absorbing abusive floods.
+- * Health checks and preflight requests are never counted.
++ * Two budgets to stay fair under a shared campus NAT:
++ *  - authenticated/token requests: per-session bucket, 600/min (≈10 req/s);
++ *  - anonymous requests: per-IP bucket, but a much higher ceiling (default
++ *    3000/min) because an entire lab/campus can share one public IP, and a
++ *    500-user public browsing wave must not be throttled.
+  */
+ export const apiLimiter = rateLimit({
+   windowMs: env.rateLimitWindowMs,
+-  max: env.rateLimitMax,
++  limit: (req) => (hasSession(req) ? env.rateLimitMax : env.rateLimitAnonMax),
+   standardHeaders: true,
+   legacyHeaders: false,
+-  skip: (req) => req.method === 'OPTIONS' || req.path === '/health' || req.path === '/health/',
++  validate: false,
++  keyGenerator: sessionKey,
++  skip: skipNonBusiness,
+   message: tooMany('Muitas requisições. Tente novamente mais tarde.'),
+ });
+ 
+-/** Stricter limit for auth endpoints (brute-force protection). */
++/**
++ * Brute-force protection for auth endpoints.
++ * Counts only FAILED attempts, per (IP + email). A successful login costs
++ * nothing, so N legitimate users can log in at once behind the same NAT.
++ */
+ export const authLimiter = rateLimit({
+   windowMs: 15 * 60 * 1000,
+   max: env.authRateLimitMax,
+   standardHeaders: true,
+   legacyHeaders: false,
++  validate: false,
++  keyGenerator: emailIpKey,
++  skipSuccessfulRequests: true,
+   message: tooMany('Muitas tentativas de login. Aguarde alguns minutos.'),
+ });
+ 
+ /**
+- * Limit for CPU/IO-expensive endpoints: exports, certificate issuance
+- * (single + mass), order creation, payment/PIX generation and registration.
+- * These are the endpoints that, if hammered, block the event loop or hold
+- * transactions open.
++ * Coarse per-IP peak limiter for the auth endpoints. Absorbs (and allows) a
++ * legitimate simultaneous login wave, but a single source cannot flood.
++ */
++export const authPeakLimiter = rateLimit({
++  windowMs: 60 * 1000,
++  max: env.authPeakLimitMax,
++  standardHeaders: true,
++  legacyHeaders: false,
++  validate: false,
++  keyGenerator: (req) => `ip:${req.ip}`,
++  message: tooMany('Muitas tentativas simultâneas. Tente novamente em instantes.'),
++});
++
++/**
++ * Limit for CPU/IO-expensive endpoints: exports, certificate issuance (single +
++ * mass), order creation, payment/PIX generation and registration. Keyed per
++ * authenticated user (set by the route's `authenticate`), so concurrent
++ * participants do not share a quota.
+  */
+ export const heavyLimiter = rateLimit({
+   windowMs: 60 * 1000,
+-  max: Number(process.env.HEAVY_RATE_LIMIT_MAX || 30),
++  max: env.heavyRateLimitMax,
+   standardHeaders: true,
+   legacyHeaders: false,
++  validate: false,
++  keyGenerator: userKey,
+   message: tooMany('Muitas operações em pouco tempo. Aguarde um instante e tente novamente.'),
+ });
+ 
+ /**
+  * Limit for opening SSE streams — prevents a single client from opening
+- * thousands of long-lived connections.
++ * thousands of long-lived connections. One bucket per user/session.
+  */
+ export const streamLimiter = rateLimit({
+   windowMs: 60 * 1000,
+-  max: Number(process.env.STREAM_RATE_LIMIT_MAX || 30),
++  max: env.streamRateLimitMax,
+   standardHeaders: true,
+   legacyHeaders: false,
++  validate: false,
++  keyGenerator: userKey,
+   message: tooMany('Muitas conexões em tempo real. Aguarde um instante.'),
+ });
+diff -ruN v91b/backend/src/routes/auth.routes.js v92/backend/src/routes/auth.routes.js
+--- v9.1/backend/src/routes/auth.routes.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/routes/auth.routes.js	2026-09-15 23:40:35.691340339 +0000
+@@ -1,14 +1,16 @@
+ import { Router } from 'express';
+ import { validate } from '../middlewares/validate.js';
+-import { authLimiter } from '../middlewares/rateLimiter.js';
++import { authLimiter, authPeakLimiter } from '../middlewares/rateLimiter.js';
+ import { authenticate } from '../middlewares/auth.js';
+ import { authSchemas } from '../validations/schemas.js';
+ import * as ctrl from '../controllers/authController.js';
+ 
+ const router = Router();
+ 
+-router.post('/register', authLimiter, validate(authSchemas.register), ctrl.register);
+-router.post('/login', authLimiter, validate(authSchemas.login), ctrl.login);
++// authPeakLimiter = coarse per-IP flood ceiling; authLimiter = per (IP+email)
++// brute-force ceiling that only counts FAILED attempts.
++router.post('/register', authPeakLimiter, authLimiter, validate(authSchemas.register), ctrl.register);
++router.post('/login', authPeakLimiter, authLimiter, validate(authSchemas.login), ctrl.login);
+ router.post('/logout', authenticate, ctrl.logout);
+ router.get('/me', authenticate, ctrl.me);
+ router.post('/forgot-password', authLimiter, validate(authSchemas.forgot), ctrl.forgotPassword);
+diff -ruN v91b/backend/src/routes/index.js v92/backend/src/routes/index.js
+--- v9.1/backend/src/routes/index.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/routes/index.js	2026-09-15 23:40:56.151671053 +0000
+@@ -17,6 +17,10 @@
+ import orderRoutes from './orders.routes.js';
+ import conversationRoutes from './conversations.routes.js';
+ import realtimeRoutes from './realtime.routes.js';
++import { authenticate } from '../middlewares/auth.js';
++import * as bootstrapCtrl from '../controllers/bootstrapController.js';
++import { metricsSnapshot } from '../utils/metrics.js';
++import { env } from '../config/env.js';
+ 
+ const router = Router();
+ 
+@@ -26,6 +30,21 @@
+   res.json({ success: true, message: 'AcadeConnect API online', data: { time: new Date().toISOString(), uptime: Math.round(process.uptime()) } })
+ );
+ 
++// Aggregate session bootstrap (1 request instead of notifications + unread-count).
++router.get('/bootstrap', authenticate, bootstrapCtrl.bootstrap);
++
++/**
++ * Aggregate metrics (V9.2). Protected by METRICS_TOKEN when configured;
++ * otherwise available only outside production. Never exposes user data.
++ */
++router.get('/metrics', (req, res) => {
++  const allowed = env.metricsToken
++    ? req.headers['x-metrics-token'] === env.metricsToken
++    : env.nodeEnv !== 'production';
++  if (!allowed) return res.status(404).json({ success: false, message: 'Not found.' });
++  return res.json({ success: true, message: 'Métricas.', data: metricsSnapshot() });
++});
++
+ router.use('/auth', authRoutes);
+ router.use('/users', userRoutes);
+ router.use('/events', eventRoutes);
+diff -ruN v91b/backend/src/server.js v92/backend/src/server.js
+--- v9.1/backend/src/server.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/server.js	2026-09-15 23:40:58.851714698 +0000
+@@ -1,6 +1,7 @@
+ import { createApp } from './app.js';
+ import { prisma, warmupPrisma, disconnectPrisma } from './config/prisma.js';
+ import { env } from './config/env.js';
++import { shutdownPasswordPool } from './utils/bcryptPool.js';
+ 
+ const app = createApp();
+ 
+@@ -42,6 +43,7 @@
+     if (server) {
+       await new Promise((resolve) => server.close(resolve));
+     }
++    await shutdownPasswordPool();
+     await disconnectPrisma();
+   } finally {
+     process.exit(0);
+diff -ruN v91b/backend/src/utils/bcryptPool.js v92/backend/src/utils/bcryptPool.js
+--- v9.1/backend/src/utils/bcryptPool.js	1970-01-01 00:00:00.000000000 +0000
++++ v9.2/backend/src/utils/bcryptPool.js	2026-09-15 23:39:54.138668675 +0000
+@@ -0,0 +1,157 @@
++import { Worker } from 'node:worker_threads';
++import os from 'node:os';
++import bcrypt from 'bcryptjs';
++
++/**
++ * Worker-thread pool for bcrypt (V9.2).
++ *
++ * WHY: `bcryptjs` runs in pure JavaScript. Even its async API occupies the
++ * single Node thread while hashing (~200-400 ms at cost 12). Under a login peak
++ * of hundreds of simultaneous users, that serializes and blocks the event loop,
++ * so unrelated requests (event listing, QR scan, SSE) stall behind logins.
++ *
++ * WHAT: the same bcryptjs library and the same cost run inside a small pool of
++ * worker threads. The HTTP thread only awaits a promise. Security parameters are
++ * unchanged (never lower the cost just to win a benchmark).
++ *
++ * RESILIENCE: if workers cannot be created (restricted runtime, bundler...), the
++ * module transparently falls back to in-process bcrypt. Authentication never
++ * fails because of the pool.
++ *
++ * CONFIG:
++ *   BCRYPT_ROUNDS          cost factor (default 12)
++ *   PASSWORD_HASH_WORKERS  worker count; 0 disables the pool (default: CPUs-1, max 4)
++ */
++
++function clampRounds(value) {
++  const n = Number(value);
++  if (!Number.isFinite(n)) return 12;
++  return Math.min(Math.max(Math.trunc(n), 10), 15);
++}
++
++const ROUNDS = clampRounds(process.env.BCRYPT_ROUNDS || 12);
++
++function resolveWorkerCount() {
++  const raw = process.env.PASSWORD_HASH_WORKERS;
++  if (raw !== undefined && raw !== '') {
++    const n = Number(raw);
++    return Number.isFinite(n) && n > 0 ? Math.min(Math.trunc(n), 8) : 0;
++  }
++  const cpus = os.availableParallelism?.() || os.cpus()?.length || 2;
++  return Math.max(1, Math.min(4, cpus - 1));
++}
++
++const WORKER_COUNT = resolveWorkerCount();
++
++let workers = null;
++let poolDisabled = WORKER_COUNT === 0;
++let sequence = 0;
++let messageId = 0;
++const pending = new Map();
++
++function spawnPool() {
++  const url = new URL('./bcryptWorker.js', import.meta.url);
++  const list = [];
++  for (let i = 0; i < WORKER_COUNT; i += 1) {
++    const worker = new Worker(url, { type: 'module' });
++    worker.on('message', (msg) => {
++      const entry = pending.get(msg?.id);
++      if (!entry) return;
++      pending.delete(msg.id);
++      if (msg.ok) entry.resolve(msg.result);
++      else entry.reject(new Error(msg.error || 'bcrypt worker error'));
++    });
++    worker.on('error', (err) => {
++      // A broken worker must not silently drop queued calls.
++      for (const [id, entry] of pending) {
++        entry.reject(err instanceof Error ? err : new Error('bcrypt worker crashed'));
++        pending.delete(id);
++      }
++    });
++    list.push(worker);
++  }
++  return list;
++}
++
++function ensurePool() {
++  if (poolDisabled) return null;
++  if (workers) return workers;
++  try {
++    workers = spawnPool();
++    return workers;
++  } catch {
++    poolDisabled = true;
++    workers = null;
++    return null;
++  }
++}
++
++function inProcess(op, args) {
++  if (op === 'hash') return bcrypt.hash(String(args.password), Number(args.rounds) || ROUNDS);
++  return bcrypt.compare(String(args.password), String(args.hash));
++}
++
++function dispatch(op, args) {
++  const pool = ensurePool();
++  if (!pool || pool.length === 0) return inProcess(op, args);
++
++  const worker = pool[sequence % pool.length];
++  sequence += 1;
++  const id = (messageId += 1);
++
++  return new Promise((resolve, reject) => {
++    const timer = setTimeout(() => {
++      pending.delete(id);
++      reject(new Error('bcrypt worker timeout'));
++    }, 30_000);
++    if (timer.unref) timer.unref();
++
++    pending.set(id, {
++      resolve: (value) => { clearTimeout(timer); resolve(value); },
++      reject: (err) => { clearTimeout(timer); reject(err); },
++    });
++    try {
++      worker.postMessage({ id, op, args });
++    } catch (err) {
++      clearTimeout(timer);
++      pending.delete(id);
++      reject(err);
++    }
++  });
++}
++
++/** Hash a password with the configured cost, off the main thread when possible. */
++export async function hashPassword(password) {
++  try {
++    return await dispatch('hash', { password: String(password), rounds: ROUNDS });
++  } catch {
++    return inProcess('hash', { password: String(password), rounds: ROUNDS });
++  }
++}
++
++/** Verify a password against its hash. Never throws for a bad password. */
++export async function verifyPassword(password, hash) {
++  try {
++    return await dispatch('compare', { password: String(password), hash: String(hash) });
++  } catch {
++    return inProcess('compare', { password: String(password), hash: String(hash) });
++  }
++}
++
++/** Pool metadata for metrics/reporting. */
++export function passwordPoolInfo() {
++  return {
++    rounds: ROUNDS,
++    workers: WORKER_COUNT,
++    active: Boolean(workers) && !poolDisabled,
++    pending: pending.size,
++  };
++}
++
++/** Terminate workers on graceful shutdown. */
++export async function shutdownPasswordPool() {
++  if (!workers) return;
++  const list = workers;
++  workers = null;
++  await Promise.allSettled(list.map((w) => w.terminate()));
++}
+diff -ruN v91b/backend/src/utils/bcryptWorker.js v92/backend/src/utils/bcryptWorker.js
+--- v9.1/backend/src/utils/bcryptWorker.js	1970-01-01 00:00:00.000000000 +0000
++++ v9.2/backend/src/utils/bcryptWorker.js	2026-09-15 23:39:54.138668675 +0000
+@@ -0,0 +1,30 @@
++import { parentPort } from 'node:worker_threads';
++import bcrypt from 'bcryptjs';
++
++/**
++ * bcrypt worker entry point.
++ *
++ * Hashing/verifying a password is CPU-bound and takes hundreds of milliseconds
++ * at cost 12. On a single Node process this blocks the event loop, so a login
++ * storm (hundreds of users at once) stalls every other request. Running bcrypt
++ * inside worker threads keeps the HTTP event loop free while the SAME algorithm
++ * and cost are preserved.
++ *
++ * Protocol: { id, op: 'hash'|'compare', args } -> { id, ok, result|error }
++ */
++parentPort.on('message', async (msg) => {
++  const { id, op, args } = msg || {};
++  try {
++    let result;
++    if (op === 'hash') {
++      result = await bcrypt.hash(String(args?.password ?? ''), Number(args?.rounds) || 12);
++    } else if (op === 'compare') {
++      result = await bcrypt.compare(String(args?.password ?? ''), String(args?.hash ?? ''));
++    } else {
++      throw new Error(`unsupported op: ${op}`);
++    }
++    parentPort.postMessage({ id, ok: true, result });
++  } catch (err) {
++    parentPort.postMessage({ id, ok: false, error: err?.message || 'bcrypt error' });
++  }
++});
+diff -ruN v91b/backend/src/utils/cache.js v92/backend/src/utils/cache.js
+--- v9.1/backend/src/utils/cache.js	2026-09-15 22:48:54.000000000 +0000
++++ v9.2/backend/src/utils/cache.js	2026-09-15 23:40:24.251155418 +0000
+@@ -18,6 +18,11 @@
+ let hits = 0;
+ let misses = 0;
+ 
++// Hard memory bound: the process must never grow without limit. When the cap
++// is reached the OLDEST inserted entry is evicted (Map preserves insertion
++// order), which is a cheap approximation of an LRU for a short-TTL cache.
++const MAX_ENTRIES = Math.max(50, Number(process.env.CACHE_MAX_ENTRIES || 1000));
++
+ // Periodic sweep so expired entries do not grow the heap forever.
+ const sweep = setInterval(() => {
+   const now = Date.now();
+@@ -43,6 +48,10 @@
+ }
+ 
+ export function cacheSet(key, value, ttlMs = 10_000) {
++  if (store.size >= MAX_ENTRIES && !store.has(key)) {
++    const oldest = store.keys().next().value;
++    if (oldest !== undefined) store.delete(oldest);
++  }
+   store.set(key, { value, expiresAt: Date.now() + ttlMs });
+   return value;
+ }
+@@ -84,5 +93,13 @@
+ }
+ 
+ export function cacheStats() {
+-  return { size: store.size, hits, misses, inflight: inflight.size };
++  const total = hits + misses;
++  return {
++    size: store.size,
++    maxEntries: MAX_ENTRIES,
++    hits,
++    misses,
++    hitRate: total ? Number((hits / total).toFixed(3)) : 0,
++    inflight: inflight.size,
++  };
+ }
+diff -ruN v91b/backend/src/utils/metrics.js v92/backend/src/utils/metrics.js
+--- v9.1/backend/src/utils/metrics.js	1970-01-01 00:00:00.000000000 +0000
++++ v9.2/backend/src/utils/metrics.js	2026-09-15 23:40:20.115088559 +0000
+@@ -0,0 +1,118 @@
++import { passwordPoolInfo } from './bcryptPool.js';
++import { cacheStats } from './cache.js';
++
++/**
++ * V9.2 — minimal, dependency-free observability.
++ *
++ * Goal: make the real bottleneck visible under load (requests/s, error rate,
++ * p95/p99 latency, SSE connections, cache effectiveness, DB pool) without
++ * exporting any user data. Everything here is aggregate counters only.
++ */
++
++const startedAt = Date.now();
++
++const requests = {
++  total: 0,
++  byStatusClass: { '1xx': 0, '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 },
++  byMethod: { GET: 0, POST: 0, PUT: 0, PATCH: 0, DELETE: 0, OTHER: 0 },
++};
++
++// Fixed-size circular reservoir of the most recent latencies (ms).
++const DURATION_SAMPLES = 5000;
++const durations = new Float64Array(DURATION_SAMPLES);
++let durationIndex = 0;
++let durationCount = 0;
++let durationSum = 0;
++
++// Route-level counters are capped so a pathological path cannot grow the heap.
++const MAX_ROUTES = 200;
++const byRoute = new Map();
++
++let sseConnections = 0;
++
++export function recordRequest({ method, route, status, durationMs }) {
++  requests.total += 1;
++
++  const statusClass = `${Math.floor(status / 100)}xx`;
++  if (requests.byStatusClass[statusClass] !== undefined) requests.byStatusClass[statusClass] += 1;
++
++  const m = requests.byMethod[method] !== undefined ? method : 'OTHER';
++  requests.byMethod[m] += 1;
++
++  durations[durationIndex] = durationMs;
++  durationIndex = (durationIndex + 1) % DURATION_SAMPLES;
++  if (durationCount < DURATION_SAMPLES) durationCount += 1;
++  durationSum += durationMs;
++
++  if (route) {
++    const key = `${method} ${route}`;
++    const entry = byRoute.get(key) || { count: 0, errors: 0, totalMs: 0 };
++    entry.count += 1;
++    entry.totalMs += durationMs;
++    if (status >= 500) entry.errors += 1;
++    byRoute.set(key, entry);
++    if (byRoute.size > MAX_ROUTES) {
++      // Drop the least-used route so cardinality stays bounded.
++      let smallestKey = null;
++      let smallest = Infinity;
++      for (const [k, v] of byRoute) {
++        if (v.count < smallest) { smallest = v.count; smallestKey = k; }
++      }
++      if (smallestKey) byRoute.delete(smallestKey);
++    }
++  }
++}
++
++export function sseOpened() { sseConnections += 1; }
++export function sseClosed() { sseConnections = Math.max(0, sseConnections - 1); }
++export function sseConnectionCount() { return sseConnections; }
++
++function percentile(p) {
++  if (durationCount === 0) return 0;
++  const values = Array.from(durations.slice(0, durationCount)).sort((a, b) => a - b);
++  const idx = Math.min(values.length - 1, Math.max(0, Math.ceil((p / 100) * values.length) - 1));
++  return Number(values[idx].toFixed(2));
++}
++
++export function metricsSnapshot() {
++  const topRoutes = [...byRoute.entries()]
++    .map(([route, v]) => ({
++      route,
++      count: v.count,
++      errors: v.errors,
++      avgMs: v.count ? Number((v.totalMs / v.count).toFixed(2)) : 0,
++    }))
++    .sort((a, b) => b.count - a.count)
++    .slice(0, 25);
++
++  const mem = process.memoryUsage();
++  return {
++    uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
++    requests: {
++      total: requests.total,
++      perSecond: Number((requests.total / Math.max(1, (Date.now() - startedAt) / 1000)).toFixed(3)),
++      byStatusClass: { ...requests.byStatusClass },
++      byMethod: { ...requests.byMethod },
++    },
++    latencyMs: {
++      samples: durationCount,
++      avg: durationCount ? Number((durationSum / durationCount).toFixed(2)) : 0,
++      p50: percentile(50),
++      p95: percentile(95),
++      p99: percentile(99),
++    },
++    topRoutes,
++    realtime: { sseConnections },
++    cache: (() => {
++      try { return cacheStats(); } catch { return null; }
++    })(),
++    passwordHashing: (() => {
++      try { return passwordPoolInfo(); } catch { return null; }
++    })(),
++    process: {
++      rssMb: Number((mem.rss / 1024 / 1024).toFixed(1)),
++      heapUsedMb: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
++      node: process.version,
++    },
++  };
++}
+diff -ruN v91b/frontend/src/api/services.js v92/frontend/src/api/services.js
+--- v9.1/frontend/src/api/services.js	2026-09-15 22:50:22.000000000 +0000
++++ v9.2/frontend/src/api/services.js	2026-09-15 23:43:16.281936129 +0000
+@@ -1,5 +1,12 @@
+ import { api, unwrap, API_BASE_URL } from './client.js';
+ 
++// ---- Session bootstrap (V9.2): one request that returns the user + the
++// notification preview + both unread counters, instead of several round-trips
++// immediately after login.
++export const bootstrapApi = {
++  get: () => api.get('/bootstrap', { fresh: true }).then(unwrap),
++};
++
+ // ---- Auth ----
+ export const authApi = {
+   register: (data) => api.post('/auth/register', data).then(unwrap),
+diff -ruN v91b/frontend/src/context/LiveDataContext.jsx v92/frontend/src/context/LiveDataContext.jsx
+--- v9.1/frontend/src/context/LiveDataContext.jsx	2026-09-15 22:49:16.000000000 +0000
++++ v9.2/frontend/src/context/LiveDataContext.jsx	2026-09-15 23:42:03.264755874 +0000
+@@ -1,5 +1,5 @@
+ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+-import { conversationApi, notificationApi } from '../api/services';
++import { bootstrapApi, conversationApi, notificationApi } from '../api/services';
+ import { subscribeRealtime, subscribeRealtimeState } from '../api/realtime';
+ import { useAuth } from './AuthContext';
+ 
+@@ -42,6 +42,7 @@
+   const unreadAtRef = useRef(0);
+   const notifInFlightRef = useRef(null);
+   const unreadInFlightRef = useRef(null);
++  const bootstrapInFlightRef = useRef(null);
+   const burstTimerRef = useRef(null);
+   const activeRef = useRef(true);
+ 
+@@ -86,6 +87,34 @@
+     [user]
+   );
+ 
++  /**
++   * V9.2: initialize the session with ONE request (/bootstrap) instead of the
++   * notifications list + unread count pair that used to follow every login.
++   * Falls back to the two individual endpoints if the aggregate is unavailable.
++   */
++  const loadInitial = useCallback(() => {
++    if (!user || !activeRef.current) return Promise.resolve();
++    if (bootstrapInFlightRef.current) return bootstrapInFlightRef.current;
++    const promise = bootstrapApi
++      .get()
++      .then((res) => {
++        if (!activeRef.current) return;
++        const d = res.data || {};
++        notifAtRef.current = Date.now();
++        unreadAtRef.current = Date.now();
++        setNotifications(d.notifications || []);
++        setUnreadNotifications(d.unreadNotifications || 0);
++        setUnreadConversations(d.unreadConversations || 0);
++      })
++      .catch(() => {
++        refreshNotifications({ force: true });
++        refreshUnreadConversations({ force: true });
++      })
++      .finally(() => { bootstrapInFlightRef.current = null; });
++    bootstrapInFlightRef.current = promise;
++    return promise;
++  }, [user, refreshNotifications, refreshUnreadConversations]);
++
+   /** One request for a whole burst of SSE events. */
+   const scheduleUnreadRefresh = useCallback(() => {
+     if (burstTimerRef.current) return;
+@@ -117,11 +146,10 @@
+       return undefined;
+     }
+     activeRef.current = true;
+-    // New session: force a fresh read of both counters.
++    // New session: one aggregate request for both counters.
+     notifAtRef.current = 0;
+     unreadAtRef.current = 0;
+-    refreshNotifications({ force: true });
+-    refreshUnreadConversations({ force: true });
++    loadInitial();
+ 
+     const unsubscribe = subscribeRealtime((evt) => {
+       if (!activeRef.current) return;
+@@ -181,8 +209,9 @@
+       if (burstTimerRef.current) { clearTimeout(burstTimerRef.current); burstTimerRef.current = null; }
+       notifInFlightRef.current = null;
+       unreadInFlightRef.current = null;
++      bootstrapInFlightRef.current = null;
+     };
+-  }, [user, refreshNotifications, refreshUnreadConversations, scheduleUnreadRefresh]);
++  }, [user, refreshNotifications, refreshUnreadConversations, scheduleUnreadRefresh, loadInitial]);
+ 
+   const value = useMemo(
+     () => ({

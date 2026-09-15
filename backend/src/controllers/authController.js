@@ -1,6 +1,6 @@
-import bcrypt from 'bcryptjs';
 import { prisma } from '../config/prisma.js';
 import { env } from '../config/env.js';
+import { hashPassword, verifyPassword } from '../utils/bcryptPool.js';
 import { ApiError } from '../utils/apiError.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -32,7 +32,7 @@ export const register = asyncHandler(async (req, res) => {
   const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
   if (existing) throw new ApiError(409, 'Já existe uma conta com este e-mail.');
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await hashPassword(password);
   // Segurança: o auto-cadastro NUNCA define papel privilegiado. Antes, enviar
   // { role: 'ORGANIZER' } no corpo da requisição criava uma conta com acesso ao
   // painel administrativo (escalação de privilégio). ADMIN/ORGANIZER só podem
@@ -81,10 +81,11 @@ export const login = asyncHandler(async (req, res) => {
   const normalizedEmail = String(email).toLowerCase().trim();
 
   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-  if (!user || user.deletedAt) throw new ApiError(401, 'Credenciais inválidas.');
-
-  const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) throw new ApiError(401, 'Credenciais inválidas.');
+  // Always run a comparison even when the user does not exist, so response time
+  // does not reveal whether an email is registered (user enumeration timing).
+  const storedHash = user?.passwordHash || '$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidinv';
+  const valid = await verifyPassword(password, storedHash);
+  if (!user || user.deletedAt || !valid) throw new ApiError(401, 'Credenciais inválidas.');
 
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
@@ -147,7 +148,7 @@ export const resetPassword = asyncHandler(async (req, res) => {
   }
   if (payload.type !== 'password_reset') throw new ApiError(400, 'Link de recuperação inválido.');
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await hashPassword(password);
   await prisma.user.update({ where: { id: payload.sub }, data: { passwordHash } });
   await createAuditLog({ userId: payload.sub, action: 'PASSWORD_RESET', resource: 'User', resourceId: payload.sub });
   return apiResponse(res, { message: 'Senha redefinida com sucesso. Faça login.' });
@@ -156,8 +157,8 @@ export const resetPassword = asyncHandler(async (req, res) => {
 export const changePassword = asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-  const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+  const valid = await verifyPassword(currentPassword, user.passwordHash);
   if (!valid) throw new ApiError(400, 'Senha atual incorreta.');
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(newPassword, 12) } });
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(newPassword) } });
   return apiResponse(res, { message: 'Senha alterada com sucesso.' });
 });

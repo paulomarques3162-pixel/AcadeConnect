@@ -2,7 +2,7 @@ import { prisma } from '../config/prisma.js';
 import { ApiError } from '../utils/apiError.js';
 import { createAuditLog } from './auditLogService.js';
 import { createNotification, createNotifications } from './notificationService.js';
-import { publishToUser } from './realtime.js';
+import { publishToUser, publishToUsers } from './realtime.js';
 
 const conversationInclude = {
   user: { select: { id: true, name: true, email: true, role: true } },
@@ -30,6 +30,16 @@ export async function listAdmins() {
     where: { role: { in: ['ADMIN', 'ORGANIZER'] }, deletedAt: null },
     select: { id: true, name: true, role: true },
     orderBy: { name: 'asc' },
+  });
+}
+
+/**
+ * Total de mensagens não lidas de um participante (used to embed the fresh
+ * count in SSE payloads so clients do not have to re-fetch).
+ */
+async function countUnreadFor(userId) {
+  return prisma.message.count({
+    where: { senderId: { not: userId }, readAt: null, conversation: { userId } },
   });
 }
 
@@ -174,7 +184,13 @@ export async function startConversationAsAdmin({ targetUserId, subject = null, m
     message: 'Você recebeu uma nova mensagem da administração.',
     link: '/comunicacao',
   });
-  publishToUser(target.id, { type: 'conversation', conversationId: conversation.id });
+  // V9.1: carry the fresh unread count so the sidebar badge updates with ZERO
+  // extra HTTP requests on the client.
+  publishToUser(target.id, {
+    type: 'conversation',
+    conversationId: conversation.id,
+    unread: await countUnreadFor(target.id),
+  });
 
   return prisma.conversation.findUnique({ where: { id: conversation.id }, include: conversationInclude });
 }
@@ -209,9 +225,23 @@ export async function sendMessage(id, requester, body) {
       admins.map((a) => a.id),
       { type: 'SYSTEM', title: 'Nova mensagem de participante', message: `Nova mensagem de ${requester.name}.`, link: '/admin/comunicacao' }
     );
+    // V9.1: staff unread totals span every conversation, so a single shared
+    // count cannot be embedded per event. A lightweight `conversation` event lets
+    // each staff tab schedule ONE debounced unread-count refresh for the whole
+    // burst (instead of one HTTP call per notification event).
+    publishToUsers(
+      admins.map((a) => a.id),
+      { type: 'conversation', conversationId: id }
+    );
   } else {
     await createNotification({ userId: conversation.userId, type: 'SYSTEM', title: 'Nova resposta da organização', message: 'Você recebeu uma resposta.', link: '/comunicacao' });
-    publishToUser(conversation.userId, { type: 'message', conversationId: id });
+    // V9.1: embed the recipient's unread total so the client updates its badge
+    // locally instead of issuing GET /conversations/unread-count.
+    publishToUser(conversation.userId, {
+      type: 'message',
+      conversationId: id,
+      unread: await countUnreadFor(conversation.userId),
+    });
   }
   return message;
 }

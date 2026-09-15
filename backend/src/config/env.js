@@ -30,13 +30,34 @@ export const env = {
   uploadDir: process.env.UPLOAD_DIR || 'uploads',
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 5),
 
-  rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+  // Rate limiting (V9.2): the general limit is keyed per SESSION (token hash),
+  // so hundreds of users behind one campus NAT do not share a budget.
+  rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60 * 1000),
   rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 600),
-  authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 20),
+  // Anonymous requests share a public IP (whole campus/NAT), so the IP ceiling
+  // must be much higher than the per-session ceiling.
+  rateLimitAnonMax: Number(process.env.RATE_LIMIT_ANON_MAX || 3000),
+  // Failed login attempts allowed per (IP + e-mail) in 15 min. Successful
+  // logins are never counted, so a whole class can sign in simultaneously.
+  authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 10),
+  // Coarse per-IP ceiling for the auth routes (absorbs legitimate login waves).
+  authPeakLimitMax: Number(process.env.AUTH_PEAK_LIMIT_MAX || 600),
+  heavyRateLimitMax: Number(process.env.HEAVY_RATE_LIMIT_MAX || 60),
+  streamRateLimitMax: Number(process.env.STREAM_RATE_LIMIT_MAX || 20),
 
   // In-memory cache TTL (ms) for read-heavy, low-write public data.
   publicCacheTtlMs: Number(process.env.PUBLIC_CACHE_TTL_MS || 15000),
   dashboardCacheTtlMs: Number(process.env.DASHBOARD_CACHE_TTL_MS || 30000),
+  cacheMaxEntries: Number(process.env.CACHE_MAX_ENTRIES || 1000),
+
+  // Password hashing: bcrypt cost (never lower it to win a benchmark) and the
+  // worker-thread pool that keeps the hashing off the HTTP event loop.
+  bcryptRounds: Number(process.env.BCRYPT_ROUNDS || 12),
+  passwordHashWorkers: process.env.PASSWORD_HASH_WORKERS ?? null,
+
+  // Protected metrics endpoint (JSON). When unset, /api/metrics is only served
+  // outside production.
+  metricsToken: process.env.METRICS_TOKEN || null,
 
   // HTTP compression threshold (bytes) and toggle.
   compressionEnabled: parseBool(process.env.COMPRESSION_ENABLED, true),

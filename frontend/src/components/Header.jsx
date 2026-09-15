@@ -4,8 +4,7 @@ import { Bell, LogOut, Menu, Moon, Sun, User, LayoutDashboard, X } from 'lucide-
 import { Logo } from './Logo';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { notificationApi } from '../api/services';
-import { subscribeRealtime } from '../api/realtime';
+import { useLiveData } from '../context/LiveDataContext';
 import { fullNameInitials } from '../utils/format';
 
 const NAV = [
@@ -23,66 +22,33 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-  const [notifs, setNotifs] = useState([]);
-  const [unread, setUnread] = useState(0);
   const userRef = useRef(null);
   const notifRef = useRef(null);
 
-  useEffect(() => {
-    let active = true;
-    let requestTimer = null;
-    let inFlight = false;
-    let lastLoadAt = 0;
+  // V9.1: the bell is fed by the shared live-data store. Incoming notifications
+  // are appended locally from the SSE payload — no HTTP request per event, and no
+  // re-fetch when a chat MESSAGE arrives (V9 reloaded the 8 notifications on every
+  // message, which was pure waste).
+  const {
+    notifications: notifs,
+    unreadNotifications: unread,
+    markNotificationRead,
+    refreshNotifications,
+  } = useLiveData();
 
-    const load = async () => {
-      if (!user || !active || inFlight) return;
-      inFlight = true;
-      try {
-        const res = await notificationApi.list({ limit: 8 });
-        if (active) {
-          setNotifs(res.data.notifications || []);
-          setUnread(res.data.unread || 0);
-          lastLoadAt = Date.now();
-        }
-      } catch {
-        // keep the last known notifications
-      } finally {
-        inFlight = false;
-      }
-    };
+  const openNotifications = () => {
+    setNotifOpen((o) => {
+      const next = !o;
+      if (next) refreshNotifications(); // staleness-guarded (>=60s)
+      return next;
+    });
+  };
 
-    const scheduleLoad = (delay = 200) => {
-      if (!active || requestTimer) return;
-      requestTimer = setTimeout(() => {
-        requestTimer = null;
-        load();
-      }, delay);
-    };
-
-    load();
-
-    // Only notification events refresh the notification list. A message event
-    // is not a second reason to fetch /notifications because the backend already
-    // emits the notification event for user-facing messages.
-    const unsubscribe = user
-      ? subscribeRealtime((evt) => {
-          if (active && evt?.type === 'notification') scheduleLoad();
-        })
-      : () => {};
-
-    const onFocus = () => {
-      // Focus is only a consistency check, not a polling mechanism.
-      if (Date.now() - lastLoadAt > 30000) scheduleLoad();
-    };
-    window.addEventListener('focus', onFocus);
-
-    return () => {
-      active = false;
-      if (requestTimer) clearTimeout(requestTimer);
-      unsubscribe();
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [user]);
+  const openNotification = (n) => {
+    if (!n.read) markNotificationRead(n.id);
+    navigate(n.link || '/minha-area');
+    setNotifOpen(false);
+  };
 
   useEffect(() => {
     const onClick = (e) => {
@@ -118,7 +84,7 @@ export function Header() {
           {user ? (
             <>
               <div className="header__notif-wrap" ref={notifRef}>
-                <button className="icon-btn" onClick={() => setNotifOpen((o) => !o)} aria-label="Notificações">
+                <button className="icon-btn" onClick={openNotifications} aria-label="Notificações">
                   <Bell size={20} />
                   {unread > 0 && <span className="header__dot">{unread}</span>}
                 </button>
@@ -127,7 +93,7 @@ export function Header() {
                     <div className="dropdown__title">Notificações</div>
                     {notifs.length === 0 && <p className="dropdown__empty">Sem notificações.</p>}
                     {notifs.map((n) => (
-                      <button key={n.id} className="dropdown__item" onClick={() => { navigate(n.link || '/minha-area'); setNotifOpen(false); }}>
+                      <button key={n.id} className="dropdown__item" onClick={() => openNotification(n)}>
                         <span className="dropdown__item-title">{n.title}</span>
                         <span className="dropdown__item-sub">{n.message}</span>
                       </button>

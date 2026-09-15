@@ -8,6 +8,7 @@ import { env } from './config/env.js';
 import { apiLimiter } from './middlewares/rateLimiter.js';
 import { notFound } from './middlewares/notFound.js';
 import { errorHandler } from './middlewares/errorHandler.js';
+import { observability } from './middlewares/observability.js';
 import routes from './routes/index.js';
 
 export function createApp() {
@@ -55,6 +56,10 @@ export function createApp() {
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());
+
+  // Request id + latency/error metrics. Runs before the rate limiter so even
+  // 429 responses are measured and carry a correlation id.
+  app.use(observability);
 
   // Rate limiting on the whole API (health + OPTIONS skipped inside the limiter).
   app.use('/api', apiLimiter);

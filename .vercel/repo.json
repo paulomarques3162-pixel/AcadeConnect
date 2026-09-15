@@ -1,0 +1,11 @@
+{
+  "remoteName": "origin",
+  "projects": [
+    {
+      "id": "prj_OyCWrtIF0vlzMaAVtmtLaZmvabrw",
+      "name": "acade-connect",
+      "directory": "frontend",
+      "orgId": "team_5Wm8y3Q2bTLrFwAaxUabKR1K"
+    }
+  ]
+}

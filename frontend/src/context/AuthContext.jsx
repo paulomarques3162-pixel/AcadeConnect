@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { authApi } from '../api/services';
 
 const AuthContext = createContext(null);
@@ -13,6 +13,10 @@ export function AuthProvider({ children }) {
   });
   const [token, setToken] = useState(() => localStorage.getItem('acadeconnect_token') || null);
   const [initializing, setInitializing] = useState(() => Boolean(localStorage.getItem('acadeconnect_token')));
+  // V9.1: a burst of 403s (several parallel admin requests with an outdated
+  // role) used to fire one /auth/me per failed request. Revalidate at most once
+  // every 30s.
+  const lastForbiddenAtRef = useRef(0);
 
   useEffect(() => {
     const onUnauthorized = () => {
@@ -25,6 +29,9 @@ export function AuthProvider({ children }) {
     // guardado em localStorage. Revalidamos a sessão para que a interface
     // reflita o papel verdadeiro em vez de mostrar telas que a API recusa.
     const onForbidden = () => {
+      const now = Date.now();
+      if (now - lastForbiddenAtRef.current < 30_000) return;
+      lastForbiddenAtRef.current = now;
       authApi
         .me()
         .then((res) => {

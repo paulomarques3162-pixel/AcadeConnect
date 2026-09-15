@@ -18,7 +18,8 @@
     "prisma:studio": "prisma studio",
     "prisma:push": "prisma db push",
     "check:role": "node scripts/check-user-role.js",
-    "set:role": "node scripts/set-user-role.js"
+    "set:role": "node scripts/set-user-role.js",
+    "create:admins": "node scripts/create-admins.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

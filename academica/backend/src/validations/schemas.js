@@ -89,24 +89,49 @@ export const eventSchemas = {
   },
 };
 
+const ACTIVITY_TYPES = ['PALESTRA', 'MINICURSO', 'WORKSHOP', 'MESA_REDONDA', 'CURSO', 'OFICINA', 'NETWORKING', 'PRATICA', 'OUTRO'];
+const ACTIVITY_STATUSES = ['SCHEDULED', 'OPEN', 'FULL', 'ONGOING', 'FINISHED', 'CANCELLED'];
+
 export const activitySchemas = {
   create: {
     body: Joi.object({
       eventId: Joi.string().required(),
       name: Joi.string().trim().min(3).max(200).required(),
       description: Joi.string().trim().allow('', null),
-      type: Joi.string().valid('PALESTRA', 'MINICURSO', 'WORKSHOP', 'MESA_REDONDA', 'CURSO', 'OFICINA', 'NETWORKING', 'PRATICA', 'OUTRO').default('OUTRO'),
+      type: Joi.string().valid(...ACTIVITY_TYPES).default('OUTRO'),
       date: Joi.date().required(),
       startTime: Joi.string().trim().required(),
       endTime: Joi.string().trim().required(),
       location: Joi.string().trim().max(200).allow('', null),
       capacity: orEmpty(Joi.number().integer().min(0)),
       speakerId: Joi.string().allow('', null),
-      status: Joi.string().valid('SCHEDULED', 'OPEN', 'FULL', 'ONGOING', 'FINISHED', 'CANCELLED').default('SCHEDULED'),
+      status: Joi.string().valid(...ACTIVITY_STATUSES).default('SCHEDULED'),
       allowsRegistration: Joi.boolean().default(true),
       requiresAttendance: Joi.boolean().default(true),
       generatesCertificate: Joi.boolean().default(true),
     }),
+  },
+  // O frontend reenvia o objeto completo do GET (inclusive relações como
+  // `event`/`speaker`/`_count`). Validamos só os campos escalares e deixamos os
+  // demais passarem — o controller faz o whitelist final para o Prisma.
+  update: {
+    params: Joi.object({ id: Joi.string().required() }),
+    body: Joi.object({
+      name: Joi.string().trim().min(3).max(200),
+      slug: Joi.string().trim().max(220).allow('', null),
+      description: Joi.string().trim().allow('', null),
+      type: Joi.string().valid(...ACTIVITY_TYPES),
+      date: Joi.date(),
+      startTime: Joi.string().trim(),
+      endTime: Joi.string().trim(),
+      location: Joi.string().trim().max(200).allow('', null),
+      capacity: orEmpty(Joi.number().integer().min(0)),
+      speakerId: Joi.string().allow('', null),
+      status: Joi.string().valid(...ACTIVITY_STATUSES),
+      allowsRegistration: Joi.boolean(),
+      requiresAttendance: Joi.boolean(),
+      generatesCertificate: Joi.boolean(),
+    }).unknown(true),
   },
 };
 

@@ -15,6 +15,9 @@ export default function AdminTelao() {
   const [name, setName] = useState('');
   const scannerRef = useRef(null);
   const processingRef = useRef(false);
+  // Enquanto o resultado está na tela (3,5s) ignoramos novas leituras, mas a
+  // câmera continua ligada — assim o telão volta a ler sozinho depois.
+  const cooldownRef = useRef(false);
   const camId = 'telao-reader';
 
   const events = useApi(() => eventApi.list({ limit: 100 }).then((r) => r.data.events), []);
@@ -25,6 +28,7 @@ export default function AdminTelao() {
   async function stop() {
     const scanner = scannerRef.current;
     scannerRef.current = null;
+    cooldownRef.current = false;
     if (scanner) {
       try { await scanner.stop(); } catch { /* */ }
       try { scanner.clear(); } catch { /* */ }
@@ -43,7 +47,7 @@ export default function AdminTelao() {
         { facingMode: 'environment' },
         { fps: 8, qrbox: { width: 280, height: 280 } },
         async (code) => {
-          if (processingRef.current) return;
+          if (processingRef.current || cooldownRef.current) return;
           processingRef.current = true;
           try { await handleScan(code); } finally { processingRef.current = false; }
         },
@@ -68,12 +72,14 @@ export default function AdminTelao() {
       setResult(res.data);
       setName(res.data.participant?.name);
       setError(null);
-      // auto-return after 3.5s
-      setTimeout(() => { setResult(null); setName(''); }, 3500);
+      // Exibe o resultado por 3,5s sem deixar a câmera reenviar a mesma leitura.
+      cooldownRef.current = true;
+      setTimeout(() => { setResult(null); setName(''); cooldownRef.current = false; }, 3500);
     } catch (e) {
       setResult('error');
       setError(e?.response?.data?.message || 'QR Code inválido.');
-      setTimeout(() => { setResult(null); setError(null); }, 2500);
+      cooldownRef.current = true;
+      setTimeout(() => { setResult(null); setError(null); cooldownRef.current = false; }, 2500);
     }
   };
 
@@ -83,48 +89,61 @@ export default function AdminTelao() {
         <Link className="btn btn--secondary" to="/admin/operador"><ArrowLeft size={18} /> Voltar</Link>
       </div>
 
-      {result ? (
-        result === 'error' ? (
-          <div className="telao__success" style={{ borderColor: '#dc2626', background: 'rgba(220,38,38,0.15)' }}>
-            <div style={{ fontSize: '4rem' }}>✕</div>
-            <h1 style={{ color: '#f87171' }}>{error || 'QR Code inválido'}</h1>
-          </div>
-        ) : (
-          <div className="telao__success">
-            <CheckCircle2 size={80} color="#4ade80" />
-            <h1>✓ PRESENÇA CONFIRMADA</h1>
-            <h2>{name}</h2>
-            <p style={{ fontSize: '1.4rem', color: '#a7f3d0' }}>Tenha um ótimo evento!</p>
-          </div>
-        )
-      ) : (
-        <>
-          <h1>CONTROLE DE PRESENÇA</h1>
-          <h2>Escaneie seu QR Code</h2>
-          <div className="filters" style={{ maxWidth: 560, justifyContent: 'center', marginBottom: 24 }}>
-            <Field label="Evento">
-              <Select value={eventId} onChange={(e) => { setEventId(e.target.value); setActivityId(''); }}>
-                <option value="">Selecione...</option>
-                {(events.data || []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </Select>
-            </Field>
-            <Field label="Atividade">
-              <Select value={activityId} onChange={(e) => setActivityId(e.target.value)}>
-                <option value="">Selecione...</option>
-                {(activities.data || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </Select>
-            </Field>
-          </div>
-          {/* The reader container must exist before Html5Qrcode is created and
-              must not be unmounted by a re-render, or the camera never starts. */}
-          <div style={{ position: 'relative', width: 380, height: 380, background: '#000', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
-            <div id={camId} />
-            {!started && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>Câmera inativa</div>}
-          </div>
-          {error && <p style={{ color: '#f87171' }}>{error}</p>}
-          {!started && <Button className="btn--lg" onClick={start}>Iniciar leitura</Button>}
-          {started && <Button variant="secondary" onClick={stop}>Parar</Button>}
-        </>
+      <h1>CONTROLE DE PRESENÇA</h1>
+      <h2>Escaneie seu QR Code</h2>
+      <div className="filters" style={{ maxWidth: 560, justifyContent: 'center', marginBottom: 24 }}>
+        <Field label="Evento">
+          <Select value={eventId} onChange={(e) => { setEventId(e.target.value); setActivityId(''); }}>
+            <option value="">Selecione...</option>
+            {(events.data || []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="Atividade">
+          <Select value={activityId} onChange={(e) => setActivityId(e.target.value)}>
+            <option value="">Selecione...</option>
+            {(activities.data || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </Select>
+        </Field>
+      </div>
+      {/* O container do leitor fica SEMPRE montado: se ele sair do DOM a
+          instância do Html5Qrcode perde o <video> e a câmera para de ler após
+          a primeira leitura. O resultado é exibido como overlay por cima. */}
+      <div style={{ position: 'relative', width: 380, height: 380, background: '#000', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
+        <div id={camId} />
+        {!started && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>Câmera inativa</div>}
+      </div>
+      {error && !result && <p style={{ color: '#f87171' }}>{error}</p>}
+      {!started && <Button className="btn--lg" onClick={start}>Iniciar leitura</Button>}
+      {started && <Button variant="secondary" onClick={stop}>Parar</Button>}
+
+      {result && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 50,
+            background: '#08130d',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 40,
+            textAlign: 'center',
+          }}
+        >
+          {result === 'error' ? (
+            <div className="telao__success" style={{ borderColor: '#dc2626', background: 'rgba(220,38,38,0.15)' }}>
+              <div style={{ fontSize: '4rem' }}>✕</div>
+              <h1 style={{ color: '#f87171' }}>{error || 'QR Code inválido'}</h1>
+            </div>
+          ) : (
+            <div className="telao__success">
+              <CheckCircle2 size={80} color="#4ade80" />
+              <h1>✓ PRESENÇA CONFIRMADA</h1>
+              <h2>{name}</h2>
+              <p style={{ fontSize: '1.4rem', color: '#a7f3d0' }}>Tenha um ótimo evento!</p>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

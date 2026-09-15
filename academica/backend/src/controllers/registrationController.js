@@ -10,6 +10,8 @@ import { createNotification } from '../services/notificationService.js';
 import { sendEmail, emailTemplates } from '../services/emailService.js';
 
 const registrationInclude = {
+  // O dono da inscrição (para a tela de detalhe não depender do usuário logado).
+  user: { select: { id: true, name: true, email: true, course: true } },
   event: {
     include: {
       institution: { select: { id: true, name: true } },
@@ -121,42 +123,21 @@ export const registerForEvent = asyncHandler(async (req, res) => {
   });
 });
 
-/**
- * Garante que a inscrição tenha um `qrToken` persistido. Inscrições antigas
- * podem ter sido criadas antes desse campo. Reemite de forma ÚNICA e segura
- * (sem inventar token no frontend, sem usar `code` como substituto silencioso,
- * sem migração destrutiva e sem apagar dados).
- */
-async function ensureQrToken(registration) {
-  if (!registration) return registration;
-  if (registration.qrToken && String(registration.qrToken).trim()) return registration;
-  let token = generateQrToken();
-  for (let i = 0; i < 6; i += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    if (!(await prisma.registration.findUnique({ where: { qrToken: token } }))) break;
-    token = generateQrToken();
-  }
-  const updated = await prisma.registration.update({ where: { id: registration.id }, data: { qrToken: token } });
-  return { ...registration, ...updated };
-}
-
 export const getMyRegistrations = asyncHandler(async (req, res) => {
-  const list = await prisma.registration.findMany({
+  const registrations = await prisma.registration.findMany({
     where: { userId: req.user.id },
     include: registrationInclude,
     orderBy: { createdAt: 'desc' },
   });
-  const registrations = await Promise.all(list.map((r) => ensureQrToken(r)));
   return apiResponse(res, { message: 'Minhas inscrições.', data: { registrations } });
 });
 
 export const getRegistration = asyncHandler(async (req, res) => {
-  const found = await prisma.registration.findUnique({
+  const registration = await prisma.registration.findUnique({
     where: { id: req.params.id },
     include: registrationInclude,
   });
-  if (!found) throw new ApiError(404, 'Inscrição não encontrada.');
-  const registration = await ensureQrToken(found);
+  if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
 
   // Only owner or admin/organizer can view.
   const isOwner = registration.userId === req.user.id;

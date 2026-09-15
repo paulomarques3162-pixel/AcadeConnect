@@ -69,8 +69,15 @@ export const listEvents = asyncHandler(async (req, res) => {
   if (modality) where.modality = modality;
   if (status) where.status = status;
   if (location) where.location = { contains: location, mode: 'insensitive' };
-  if (date === 'upcoming') where.startDate = { gte: new Date() };
-  if (date === 'past') where.endDate = { lt: new Date() };
+  // Datas de evento são dias de calendário gravados à meia-noite UTC. Comparar
+  // com o instante atual excluía o evento DE HOJE de "upcoming". Comparamos com
+  // o início do dia UTC: hoje entra em upcoming e sai de past.
+  if (date === 'upcoming' || date === 'past') {
+    const now = new Date();
+    const startOfTodayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    if (date === 'upcoming') where.startDate = { gte: startOfTodayUtc };
+    if (date === 'past') where.endDate = { lt: startOfTodayUtc };
+  }
 
   const orderBy =
     sort === 'closest'
@@ -201,9 +208,16 @@ export const updateEvent = asyncHandler(async (req, res) => {
   // exactly why event edits (dates, times, text) were not persisted before.
   const data = {};
 
-  const textFields = ['name', 'shortDescription', 'description', 'startTime', 'location', 'address', 'modality', 'category', 'status'];
-  for (const f of textFields) {
+  // Campos opcionais podem vir vazios do formulário -> gravamos null.
+  const nullableTextFields = ['shortDescription', 'description', 'startTime', 'location', 'address', 'category'];
+  for (const f of nullableTextFields) {
     if (body[f] !== undefined) data[f] = body[f] === '' ? null : body[f];
+  }
+  // Campos obrigatórios (name/modality/status) nunca podem virar null: se o
+  // valor chegar vazio, mantemos o atual em vez de descartar todo o save com 422.
+  const requiredTextFields = ['name', 'modality', 'status'];
+  for (const f of requiredTextFields) {
+    if (body[f] !== undefined && body[f] !== '') data[f] = body[f];
   }
 
   if (body.startDate !== undefined) {

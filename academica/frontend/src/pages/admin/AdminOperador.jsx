@@ -75,24 +75,21 @@ export default function AdminOperador() {
     setError(null);
     setResult(null);
     const v = String(value ?? '').trim();
-    const fmt = /^AC[0-9a-f]{20,}$/i.test(v) ? 'qrToken' : (source === 'manual' ? 'manual' : 'desconhecido');
-    // Diagnóstico seguro: mostra só o prefixo, nunca o token completo.
+    // Debug (não expõe o token inteiro): ajuda a diagnosticar em produção.
     // eslint-disable-next-line no-console
-    console.debug('[QR FLOW] decodedText:', `${v.slice(0, 8)}...`, '| tamanho:', v.length, '| formato:', fmt, '| activityId:', activityId || '(vazio)');
+    console.debug('[QR DEBUG] valor lido:', `${v.slice(0, 6)}...`, '| tamanho:', v.length, '| formato:', /^AC[0-9a-f]{20,}$/i.test(v) ? 'qrToken' : (source === 'manual' ? 'manual' : 'desconhecido'), '| activityId:', activityId || '(vazio)');
     try {
       // Explicit origin: camera = qrToken, manual = code. Never mixed.
       const res = source === 'manual'
         ? await attendanceApi.scanManual(v, activityId)
         : await attendanceApi.scanQr(v, activityId);
       // eslint-disable-next-line no-console
-      console.debug('[QR FLOW] payload enviado:', source === 'manual' ? `{ code: "${v.slice(0, 8)}...", activityId }` : `{ qrToken: "${v.slice(0, 8)}...", activityId }`);
-      // eslint-disable-next-line no-console
-      console.debug('[QR FLOW] status resposta:', 201, res?.message);
+      console.debug('[QR DEBUG] enviando', source === 'manual' ? '{ code, activityId }' : '{ qrToken, activityId }', '| resposta:', res?.message);
       setResult({ ok: true, ...res.data });
       toast.success('Presença registrada com sucesso!');
     } catch (e) {
       // eslint-disable-next-line no-console
-      console.debug('[QR FLOW] status resposta:', e?.response?.status, e?.response?.data?.message);
+      console.debug('[QR DEBUG] resposta do backend:', e?.response?.status, e?.response?.data?.message);
       setResult({ ok: false });
       setError(e?.response?.data?.message || 'QR Code inválido.');
     }

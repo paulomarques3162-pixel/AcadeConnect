@@ -167,25 +167,6 @@ Resultado: **29/29 verificações PASS** (incluindo o fuso brasileiro).
 - **Duplicidade**: verificação + constraint única `@@unique([registrationId, activityId])`; 409 com `details.recordedAt`/`method`. Concorrência: 1 registro.
 - **Prova real do QR**: o QR gerado foi decodificado com um leitor real (`jsqr`) e o conteúdo é exatamente o `qrToken` — não data URL/base64/URL/JSON.
 
-## 11.00 PROVA DO FLUXO DO QR (conteúdo real)
-
-Teste que compara os 5 valores usando o **mesmo encoder do `react-qr-code`** (`qrcode-generator`: `qrcode(0, level); addData(value); make()`) e decodifica o bitmap gerado com um leitor real (`jsqr`):
-
-| Valor | Resultado |
-|---|---|
-| A) `registration.qrToken` (API) | `AC01a0e16df214...` |
-| B) conteúdo embutido no QR (`QRCodeCard value`) | = A |
-| C) `decodedText` da câmera | = A |
-| D) `qrToken` no `POST /attendance/scan` | = A → **201** |
-| E) `Registration.qrToken` pesquisado no backend | = A → presença gravada |
-
-**Resultado: `registration.qrToken === conteúdo do QR === decodedText === qrToken enviado === qrToken pesquisado` → TRUE.**
-- `GET registration` devolve o `qrToken`; o QR é gerado com ele (não com o data URL).
-- Conteúdo do QR não é imagem/HTML/JSON (começa com `AC`, sem `data:`/`<`/`{`).
-- `POST /attendance/scan { qrToken }` → **201**, `method=QR_CODE`; duplicidade → **409**; manual `{ code }` → **201 MANUAL**.
-- Enviar o token no campo `code` **não** resolve (404) — sem uso cruzado, como deve ser.
-- Inscrições antigas sem `qrToken`: `ensureQrToken()` reemite e **persiste** um token único ao abrir a inscrição (sem migração destrutiva).
-
 ## 11.0 Correção crítica de fuso na presença (isFinished)
 
 **Causa:** `isFinished()` em `attendanceService.js` fazia `new Date(getUTCFullYear, getUTCMonth, getUTCDate, h, m)` — ou seja, o horário de término era interpretado no **fuso local do servidor**. Em produção (Render) o servidor roda em **UTC**, então uma atividade 08:00–15:00 do Brasil terminava às 15:00Z = **12:00 local**, bloqueando presença à tarde.

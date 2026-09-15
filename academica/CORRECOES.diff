@@ -1,7 +1,7 @@
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/RELATORIO_AUDITORIA.md /tmp/acade/academica/RELATORIO_AUDITORIA.md
 --- /tmp/orig/academica/RELATORIO_AUDITORIA.md	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/acade/academica/RELATORIO_AUDITORIA.md	2026-09-11 23:33:49.108413195 +0000
-@@ -0,0 +1,265 @@
++++ /tmp/acade/academica/RELATORIO_AUDITORIA.md	2026-09-11 17:34:57.610635422 +0000
+@@ -0,0 +1,246 @@
 +# Relatório de Auditoria Técnica — Mustangs Atlética / AcadeConnect
 +
 +Auditoria completa (frontend, backend, banco e QR Code) com **correção de bugs** e **testes de ponta a ponta** executados em ambiente real (PostgreSQL 15 + Node 22 + React/Vite).
@@ -170,25 +170,6 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
 +- **Validação no evento correto**: `activity.eventId !== registration.eventId` → 409.
 +- **Duplicidade**: verificação + constraint única `@@unique([registrationId, activityId])`; 409 com `details.recordedAt`/`method`. Concorrência: 1 registro.
 +- **Prova real do QR**: o QR gerado foi decodificado com um leitor real (`jsqr`) e o conteúdo é exatamente o `qrToken` — não data URL/base64/URL/JSON.
-+
-+## 11.00 PROVA DO FLUXO DO QR (conteúdo real)
-+
-+Teste que compara os 5 valores usando o **mesmo encoder do `react-qr-code`** (`qrcode-generator`: `qrcode(0, level); addData(value); make()`) e decodifica o bitmap gerado com um leitor real (`jsqr`):
-+
-+| Valor | Resultado |
-+|---|---|
-+| A) `registration.qrToken` (API) | `AC01a0e16df214...` |
-+| B) conteúdo embutido no QR (`QRCodeCard value`) | = A |
-+| C) `decodedText` da câmera | = A |
-+| D) `qrToken` no `POST /attendance/scan` | = A → **201** |
-+| E) `Registration.qrToken` pesquisado no backend | = A → presença gravada |
-+
-+**Resultado: `registration.qrToken === conteúdo do QR === decodedText === qrToken enviado === qrToken pesquisado` → TRUE.**
-+- `GET registration` devolve o `qrToken`; o QR é gerado com ele (não com o data URL).
-+- Conteúdo do QR não é imagem/HTML/JSON (começa com `AC`, sem `data:`/`<`/`{`).
-+- `POST /attendance/scan { qrToken }` → **201**, `method=QR_CODE`; duplicidade → **409**; manual `{ code }` → **201 MANUAL**.
-+- Enviar o token no campo `code` **não** resolve (404) — sem uso cruzado, como deve ser.
-+- Inscrições antigas sem `qrToken`: `ensureQrToken()` reemite e **persiste** um token único ao abrir a inscrição (sem migração destrutiva).
 +
 +## 11.0 Correção crítica de fuso na presença (isFinished)
 +
@@ -741,7 +722,7 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
  
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/registrationController.js /tmp/acade/academica/backend/src/controllers/registrationController.js
 --- /tmp/orig/academica/backend/src/controllers/registrationController.js	2026-09-11 12:07:30.000000000 +0000
-+++ /tmp/acade/academica/backend/src/controllers/registrationController.js	2026-09-11 23:33:13.908139209 +0000
++++ /tmp/acade/academica/backend/src/controllers/registrationController.js	2026-09-11 15:59:27.418101142 +0000
 @@ -64,6 +64,9 @@
  
    // Validate selected activities belong to event & have capacity.
@@ -767,52 +748,6 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
    }
    const qrToken = generateQrToken();
  
-@@ -116,21 +121,42 @@
-   });
- });
- 
-+/**
-+ * Garante que a inscrição tenha um `qrToken` persistido. Inscrições antigas
-+ * podem ter sido criadas antes desse campo. Reemite de forma ÚNICA e segura
-+ * (sem inventar token no frontend, sem usar `code` como substituto silencioso,
-+ * sem migração destrutiva e sem apagar dados).
-+ */
-+async function ensureQrToken(registration) {
-+  if (!registration) return registration;
-+  if (registration.qrToken && String(registration.qrToken).trim()) return registration;
-+  let token = generateQrToken();
-+  for (let i = 0; i < 6; i += 1) {
-+    // eslint-disable-next-line no-await-in-loop
-+    if (!(await prisma.registration.findUnique({ where: { qrToken: token } }))) break;
-+    token = generateQrToken();
-+  }
-+  const updated = await prisma.registration.update({ where: { id: registration.id }, data: { qrToken: token } });
-+  return { ...registration, ...updated };
-+}
-+
- export const getMyRegistrations = asyncHandler(async (req, res) => {
--  const registrations = await prisma.registration.findMany({
-+  const list = await prisma.registration.findMany({
-     where: { userId: req.user.id },
-     include: registrationInclude,
-     orderBy: { createdAt: 'desc' },
-   });
-+  const registrations = await Promise.all(list.map((r) => ensureQrToken(r)));
-   return apiResponse(res, { message: 'Minhas inscrições.', data: { registrations } });
- });
- 
- export const getRegistration = asyncHandler(async (req, res) => {
--  const registration = await prisma.registration.findUnique({
-+  const found = await prisma.registration.findUnique({
-     where: { id: req.params.id },
-     include: registrationInclude,
-   });
--  if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
-+  if (!found) throw new ApiError(404, 'Inscrição não encontrada.');
-+  const registration = await ensureQrToken(found);
- 
-   // Only owner or admin/organizer can view.
-   const isOwner = registration.userId === req.user.id;
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/backend/src/controllers/reportController.js /tmp/acade/academica/backend/src/controllers/reportController.js
 --- /tmp/orig/academica/backend/src/controllers/reportController.js	2026-09-09 14:21:48.000000000 +0000
 +++ /tmp/acade/academica/backend/src/controllers/reportController.js	2026-09-11 15:17:08.054117161 +0000
@@ -1467,7 +1402,7 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
  
 diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclude=.env' '--exclude=package-lock.json' /tmp/orig/academica/frontend/src/pages/admin/AdminOperador.jsx /tmp/acade/academica/frontend/src/pages/admin/AdminOperador.jsx
 --- /tmp/orig/academica/frontend/src/pages/admin/AdminOperador.jsx	2026-09-10 15:27:32.000000000 +0000
-+++ /tmp/acade/academica/frontend/src/pages/admin/AdminOperador.jsx	2026-09-11 23:33:05.304072245 +0000
++++ /tmp/acade/academica/frontend/src/pages/admin/AdminOperador.jsx	2026-09-11 17:05:24.897231030 +0000
 @@ -19,6 +19,7 @@
    const [found, setFound] = useState(null);
    const [busy, setBusy] = useState(false);
@@ -1497,7 +1432,7 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
    }
  
    const startScanner = async () => {
-@@ -42,34 +42,57 @@
+@@ -42,34 +42,54 @@
      setError(null);
      setResult(null);
      try {
@@ -1540,10 +1475,9 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
      setError(null);
      setResult(null);
 +    const v = String(value ?? '').trim();
-+    const fmt = /^AC[0-9a-f]{20,}$/i.test(v) ? 'qrToken' : (source === 'manual' ? 'manual' : 'desconhecido');
-+    // Diagnóstico seguro: mostra só o prefixo, nunca o token completo.
++    // Debug (não expõe o token inteiro): ajuda a diagnosticar em produção.
 +    // eslint-disable-next-line no-console
-+    console.debug('[QR FLOW] decodedText:', `${v.slice(0, 8)}...`, '| tamanho:', v.length, '| formato:', fmt, '| activityId:', activityId || '(vazio)');
++    console.debug('[QR DEBUG] valor lido:', `${v.slice(0, 6)}...`, '| tamanho:', v.length, '| formato:', /^AC[0-9a-f]{20,}$/i.test(v) ? 'qrToken' : (source === 'manual' ? 'manual' : 'desconhecido'), '| activityId:', activityId || '(vazio)');
      try {
 -      const res = await attendanceApi.scan(code.trim(), activityId);
 +      // Explicit origin: camera = qrToken, manual = code. Never mixed.
@@ -1551,18 +1485,16 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
 +        ? await attendanceApi.scanManual(v, activityId)
 +        : await attendanceApi.scanQr(v, activityId);
 +      // eslint-disable-next-line no-console
-+      console.debug('[QR FLOW] payload enviado:', source === 'manual' ? `{ code: "${v.slice(0, 8)}...", activityId }` : `{ qrToken: "${v.slice(0, 8)}...", activityId }`);
-+      // eslint-disable-next-line no-console
-+      console.debug('[QR FLOW] status resposta:', 201, res?.message);
++      console.debug('[QR DEBUG] enviando', source === 'manual' ? '{ code, activityId }' : '{ qrToken, activityId }', '| resposta:', res?.message);
        setResult({ ok: true, ...res.data });
        toast.success('Presença registrada com sucesso!');
      } catch (e) {
 +      // eslint-disable-next-line no-console
-+      console.debug('[QR FLOW] status resposta:', e?.response?.status, e?.response?.data?.message);
++      console.debug('[QR DEBUG] resposta do backend:', e?.response?.status, e?.response?.data?.message);
        setResult({ ok: false });
        setError(e?.response?.data?.message || 'QR Code inválido.');
      }
-@@ -77,7 +100,7 @@
+@@ -77,7 +97,7 @@
  
    const handleManualSubmit = (e) => {
      e.preventDefault();
@@ -1571,7 +1503,7 @@ diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=uploads' '--exclu
    };
  
    const searchParticipant = async () => {
-@@ -131,25 +154,25 @@
+@@ -131,25 +151,25 @@
        </div>
  
        <div className="card card-pad mb-3">

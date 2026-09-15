@@ -7,6 +7,11 @@ export const list = asyncHandler(async (req, res) => {
   return apiResponse(res, { message: 'Sorteios.', data: { raffles } });
 });
 
+export const results = asyncHandler(async (req, res) => {
+  const raffles = await svc.listPublicResults({ eventId: req.query.eventId });
+  return apiResponse(res, { message: 'Resultados dos sorteios.', data: { raffles } });
+});
+
 export const getOne = asyncHandler(async (req, res) => {
   const raffle = await svc.getRaffle(req.params.id);
   return apiResponse(res, { message: 'Sorteio.', data: { raffle } });

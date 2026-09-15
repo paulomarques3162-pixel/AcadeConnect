@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Send, CheckCircle2, RotateCcw } from 'lucide-react';
-import { conversationApi } from '../../api/services';
+import { Send, CheckCircle2, RotateCcw, Mail, Search, User } from 'lucide-react';
+import { conversationApi, adminApi } from '../../api/services';
 import { useApi } from '../../hooks/useApi';
 import { useToast } from '../../context/ToastContext';
-import { Button, Input, Card, StatusBadge, Spinner, ErrorState, EmptyState } from '../../components/ui';
+import { Button, Field, Input, Textarea, Card, StatusBadge, Spinner, ErrorState, EmptyState } from '../../components/ui';
+import { Modal } from '../../components/Overlay';
 import { getErrorMessage } from '../../api/client';
 import { formatDateTime } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
@@ -14,6 +15,16 @@ export default function AdminComunicacao() {
   const [selectedId, setSelectedId] = useState(null);
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
+
+  // Nova mensagem direcionada
+  const [newOpen, setNewOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [target, setTarget] = useState(null);
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [starting, setStarting] = useState(false);
 
   const list = useApi(() => conversationApi.adminList().then((r) => r.data.conversations), []);
   const detail = useApi(() => (selectedId ? conversationApi.get(selectedId).then((r) => r.data.conversation) : Promise.resolve(null)), [selectedId]);
@@ -40,13 +51,44 @@ export default function AdminComunicacao() {
     catch (e) { toast.error(getErrorMessage(e)); }
   };
 
+  const searchUsers = async (e) => {
+    e?.preventDefault();
+    setSearching(true);
+    try {
+      const res = await adminApi.users({ search, limit: 10 });
+      setResults(res.data?.users || []);
+    } catch (err) { toast.error(getErrorMessage(err)); }
+    finally { setSearching(false); }
+  };
+
+  const openNew = () => {
+    setTarget(null); setSearch(''); setResults([]); setSubject(''); setMessage('');
+    setNewOpen(true);
+  };
+
+  const startNew = async (e) => {
+    e.preventDefault();
+    if (!target) return toast.error('Selecione o destinatário.');
+    if (!message.trim()) return toast.error('Escreva a mensagem.');
+    setStarting(true);
+    try {
+      const res = await conversationApi.adminStart({ userId: target.id, subject: subject || null, message: message.trim() });
+      toast.success('Mensagem enviada.');
+      setNewOpen(false);
+      list.reload();
+      setSelectedId(res.data.conversation.id);
+    } catch (err) { toast.error(getErrorMessage(err)); }
+    finally { setStarting(false); }
+  };
+
   return (
     <>
       <div className="page-head">
         <div>
           <h1>Comunicação</h1>
-          <p>Converse com os participantes.</p>
+          <p>Converse com os participantes ou envie uma mensagem direcionada.</p>
         </div>
+        <Button onClick={openNew} icon={<Mail size={17} />}>Nova mensagem</Button>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(240px,320px) 1fr' }}>
@@ -67,7 +109,7 @@ export default function AdminComunicacao() {
         </div>
 
         <div>
-          {!selectedId && <p className="text-muted">Selecione uma conversa.</p>}
+          {!selectedId && <p className="text-muted">Selecione uma conversa ou clique em “Nova mensagem”.</p>}
           {selectedId && detail.data && (
             <Card className="card-pad">
               <div className="flex-between mb-2">
@@ -103,6 +145,45 @@ export default function AdminComunicacao() {
           )}
         </div>
       </div>
+
+      <Modal open={newOpen} onClose={() => setNewOpen(false)} title="Nova mensagem para usuário">
+        <form onSubmit={startNew} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Field label="Destinatário" required>
+            {target ? (
+              <div className="flex-between card card-pad" style={{ padding: 10 }}>
+                <div className="flex" style={{ gap: 8 }}>
+                  <User size={18} />
+                  <div>
+                    <strong>{target.name}</strong>
+                    <p className="text-muted" style={{ margin: 0, fontSize: '0.8rem' }}>{target.email}</p>
+                  </div>
+                </div>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setTarget(null)}>Trocar</Button>
+              </div>
+            ) : (
+              <>
+                <div className="flex">
+                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por nome ou e-mail..." />
+                  <Button type="button" variant="secondary" loading={searching} onClick={searchUsers} icon={<Search size={16} />}>Buscar</Button>
+                </div>
+                {results.length > 0 && (
+                  <div className="list mt-2">
+                    {results.map((u) => (
+                      <button type="button" key={u.id} className="attendance-row" style={{ cursor: 'pointer', textAlign: 'left' }} onClick={() => setTarget(u)}>
+                        <span className="attendance-row__name">{u.name}</span>
+                        <span className="attendance-row__code">{u.email}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </Field>
+          <Field label="Assunto"><Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Ex.: Informação sobre sua inscrição" /></Field>
+          <Field label="Mensagem" required><Textarea value={message} onChange={(e) => setMessage(e.target.value)} required /></Field>
+          <Button type="submit" loading={starting} disabled={!target}>Enviar mensagem</Button>
+        </form>
+      </Modal>
     </>
   );
 }

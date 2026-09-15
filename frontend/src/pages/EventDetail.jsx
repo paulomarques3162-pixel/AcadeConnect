@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Calendar, MapPin, Clock, Users, Award, CheckCircle2, Ticket } from 'lucide-react';
+import { Calendar, MapPin, Clock, Users, Award, CheckCircle2, Ticket, AlertCircle } from 'lucide-react';
 import { eventApi, registrationApi } from '../api/services';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../context/AuthContext';
@@ -18,9 +18,25 @@ export default function EventDetail() {
   const [selected, setSelected] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
+  const [formError, setFormError] = useState(null);
+  const [myReg, setMyReg] = useState(null);
 
   const { data, loading, error } = useApi(() => eventApi.get(idOrSlug).then((r) => r.data), [idOrSlug]);
   const event = data;
+
+  // Sabe se o usuário já está inscrito neste evento (para destaque).
+  useEffect(() => {
+    let active = true;
+    if (user && event?.id) {
+      registrationApi
+        .mine()
+        .then((r) => { if (active) setMyReg((r.data.registrations || []).find((x) => x.eventId === event.id && x.status === 'CONFIRMED') || null); })
+        .catch(() => {});
+    } else {
+      setMyReg(null);
+    }
+    return () => { active = false; };
+  }, [user, event?.id]);
 
   const grouped = (event?.activities || []).reduce((acc, a) => {
     // Group by CALENDAR DAY (UTC day for UTC-midnight dates). Using
@@ -31,14 +47,22 @@ export default function EventDetail() {
     return acc;
   }, {});
 
-  const toggleActivity = (id) =>
+  const toggleActivity = (id) => {
+    setFormError(null);
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  };
 
   const handleSubscribe = async () => {
     if (!user) {
       navigate('/login', { state: { from: `/eventos/${event.slug || event.id}` } });
       return;
     }
+    // Validação antes de enviar: não perde dados e destaca o que falta.
+    if (event.requireActivityRegistration && selected.length === 0) {
+      setFormError('Falta selecionar uma atividade obrigatória. Revise os itens destacados antes de concluir sua inscrição.');
+      return;
+    }
+    setFormError(null);
     setSubmitting(true);
     try {
       const res = await registrationApi.registerForEvent(event.id, selected);
@@ -72,13 +96,27 @@ export default function EventDetail() {
   if (error || !event) return <div className="container"><ErrorState title="Evento não encontrado." onRetry={() => navigate('/eventos')} /></div>;
 
   const canRegister = event.allowRegistration && ['PUBLISHED', 'OPEN', 'ONGOING'].includes(event.status);
+  const todayK = calendarDayKey(new Date());
+  const isToday = calendarDayKey(event.startDate) === todayK;
+  const isEnded = event.status === 'CLOSED' || (event.endDate && calendarDayKey(event.endDate) < todayK);
+  const closingSoon = (() => {
+    if (!event.registrationEnd || isEnded) return false;
+    const d = Math.round((new Date(`${calendarDayKey(event.registrationEnd)}T00:00:00Z`) - new Date(`${todayK}T00:00:00Z`)) / 86400000);
+    return d >= 0 && d <= 3;
+  })();
 
   return (
     <>
       <section className="event-hero">
         {event.bannerUrl && <SmartImage src={event.bannerUrl} alt="" className="event-hero__img" />}
         <div className="event-hero__inner">
-          <StatusBadge status={event.status} />
+          <div className="flex flex-wrap" style={{ gap: 6 }}>
+            <StatusBadge status={event.status} />
+            {isToday && !isEnded && <span className="badge badge--danger">Evento hoje</span>}
+            {closingSoon && <span className="badge badge--warning">Inscrição encerrando</span>}
+            {isEnded && <span className="badge badge--neutral">Evento encerrado</span>}
+            {myReg && <span className="badge badge--success">Você já está inscrito</span>}
+          </div>
           <h1 style={{ marginTop: 12 }}>{event.name}</h1>
           <div className="event-hero__meta">
             <span><Calendar size={18} /> {formatDate(event.startDate)} — {formatDate(event.endDate)}</span>
@@ -97,7 +135,10 @@ export default function EventDetail() {
             </section>
 
             <section className="mb-3">
-              <h2 style={{ marginBottom: 16 }}>Programação</h2>
+              <div className="flex" style={{ gap: 10, marginBottom: 16 }}>
+                <h2 style={{ margin: 0 }}>Programação</h2>
+                {formError && <span className="badge badge--danger">Falta selecionar atividade</span>}
+              </div>
               {Object.keys(grouped).length === 0 && <p className="text-muted">A programação ainda não foi publicada.</p>}
               {Object.entries(grouped).map(([key, acts]) => (
                 <div className="schedule-day" key={key}>
@@ -170,15 +211,24 @@ export default function EventDetail() {
                     )}
                     <Link className="btn btn--primary btn--block" to={`/inscricao/${confirmation.registration.id}`}>Ver minha inscrição</Link>
                   </div>
+                ) : myReg ? (
+                  <Link className="btn btn--primary btn--block" to={`/inscricao/${myReg.id}`}>Ver minha inscrição</Link>
                 ) : canRegister ? (
                   <>
                     <Button className="btn--lg btn--block" loading={submitting} onClick={handleSubscribe}>
                       <Ticket size={20} /> INSCREVER-SE
                     </Button>
                     {event.requireActivityRegistration && (
-                      <p className="text-muted" style={{ fontSize: '0.82rem', margin: 0 }}>
-                        Selecione as atividades desejadas acima. Inscrito(s): {selected.length}
-                      </p>
+                      <div style={{ fontSize: '0.82rem' }}>
+                        <div className="flex" style={{ color: selected.length > 0 ? 'var(--success)' : 'var(--warning)', gap: 6 }}>
+                          <CheckCircle2 size={14} />
+                          <span>Evento selecionado</span>
+                        </div>
+                        <div className="flex" style={{ color: selected.length > 0 ? 'var(--success)' : 'var(--danger)', gap: 6 }}>
+                          <AlertCircle size={14} />
+                          <span>Atividade obrigatória: {selected.length > 0 ? `selecionada (${selected.length})` : 'não selecionada'}</span>
+                        </div>
+                      </div>
                     )}
                   </>
                 ) : (
@@ -188,6 +238,9 @@ export default function EventDetail() {
                 )}
                 {!user && !confirmation && (
                   <Link className="btn btn--secondary btn--block" to="/login">Entrar para se inscrever</Link>
+                )}
+                {formError && (
+                  <p className="field__error" style={{ marginTop: 8 }}>{formError}</p>
                 )}
               </div>
 

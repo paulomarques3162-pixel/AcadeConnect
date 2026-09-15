@@ -7,6 +7,11 @@ export const admins = asyncHandler(async (_req, res) => {
   return apiResponse(res, { message: 'Administradores disponíveis.', data: { admins } });
 });
 
+export const unreadCount = asyncHandler(async (req, res) => {
+  const unread = await svc.unreadCount(req.user);
+  return apiResponse(res, { message: 'Mensagens não lidas.', data: { unread } });
+});
+
 export const mine = asyncHandler(async (req, res) => {
   const conversations = await svc.listMyConversations(req.user.id);
   return apiResponse(res, { message: 'Minhas conversas.', data: { conversations } });
@@ -25,6 +30,17 @@ export const getOne = asyncHandler(async (req, res) => {
 export const start = asyncHandler(async (req, res) => {
   const conversation = await svc.startConversation(req.user.id, req.body);
   return apiResponse(res, { status: 201, message: 'Conversa iniciada.', data: { conversation } });
+});
+
+export const adminStart = asyncHandler(async (req, res) => {
+  const conversation = await svc.startConversationAsAdmin({
+    targetUserId: req.body.userId,
+    subject: req.body.subject,
+    message: req.body.message,
+    assignedToId: req.body.assignedToId || null,
+    operator: req.user,
+  });
+  return apiResponse(res, { status: 201, message: 'Mensagem enviada.', data: { conversation } });
 });
 
 export const send = asyncHandler(async (req, res) => {

@@ -27,6 +27,18 @@ export async function listAdmins() {
   });
 }
 
+/** Conta mensagens não lidas para o usuário autenticado. */
+export async function unreadCount(requester) {
+  const isStaff = ['ADMIN', 'ORGANIZER'].includes(requester.role);
+  return prisma.message.count({
+    where: {
+      senderId: { not: requester.id },
+      readAt: null,
+      ...(isStaff ? {} : { conversation: { userId: requester.id } }),
+    },
+  });
+}
+
 export async function listMyConversations(userId) {
   return prisma.conversation.findMany({
     where: { userId },
@@ -66,6 +78,49 @@ export async function startConversation(userId, { subject = null, message, assig
     await tx.message.create({ data: { conversationId: conv.id, senderId: userId, senderRole: 'PARTICIPANT', body: String(message).trim() } });
     return conv;
   });
+  return prisma.conversation.findUnique({ where: { id: conversation.id }, include: conversationInclude });
+}
+
+/**
+ * ADM/ORGANIZER inicia uma conversa DIRECIONADA para um usuário específico.
+ * A conversa pertence exclusivamente ao usuário selecionado; só ele a vê.
+ */
+export async function startConversationAsAdmin({ targetUserId, subject = null, message, assignedToId = null, operator }) {
+  if (!message || !String(message).trim()) throw new ApiError(422, 'Escreva uma mensagem.');
+  const target = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { id: true, name: true, email: true, deletedAt: true },
+  });
+  if (!target || target.deletedAt) throw new ApiError(404, 'Usuário não encontrado.');
+
+  const conversation = await prisma.$transaction(async (tx) => {
+    const conv = await tx.conversation.create({
+      data: {
+        userId: target.id,
+        subject: subject ? String(subject).trim() : null,
+        assignedToId: assignedToId || operator.id,
+        lastMessageAt: new Date(),
+      },
+    });
+    await tx.message.create({
+      data: {
+        conversationId: conv.id,
+        senderId: operator.id,
+        senderRole: operator.role,
+        body: String(message).trim(),
+      },
+    });
+    return conv;
+  });
+
+  await createNotification({
+    userId: target.id,
+    type: 'SYSTEM',
+    title: 'Nova mensagem da organização',
+    message: 'Você recebeu uma nova mensagem da administração.',
+    link: '/comunicacao',
+  });
+
   return prisma.conversation.findUnique({ where: { id: conversation.id }, include: conversationInclude });
 }
 

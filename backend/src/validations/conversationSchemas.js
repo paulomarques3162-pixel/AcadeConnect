@@ -8,6 +8,14 @@ export const conversationSchemas = {
       assignedToId: Joi.string().allow('', null),
     }),
   },
+  adminStart: {
+    body: Joi.object({
+      userId: Joi.string().required(),
+      subject: Joi.string().trim().max(150).allow('', null),
+      message: Joi.string().trim().min(1).max(2000).required(),
+      assignedToId: Joi.string().allow('', null),
+    }),
+  },
   message: {
     params: Joi.object({ id: Joi.string().required() }),
     body: Joi.object({ body: Joi.string().trim().min(1).max(2000).required() }),

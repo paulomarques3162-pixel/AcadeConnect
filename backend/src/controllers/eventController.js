@@ -7,6 +7,7 @@ import { publicUrl } from '../config/multer.js';
 import { slugify, generateRegistrationCode } from '../utils/codes.js';
 import { parseDate } from '../utils/date.js';
 import { createAuditLog } from '../services/auditLogService.js';
+import { createNotification } from '../services/notificationService.js';
 import { autoIssueCertificatesForEvent } from '../services/certificateService.js';
 
 const eventInclude = (includeStats = false) => ({
@@ -313,6 +314,40 @@ export const updateEvent = asyncHandler(async (req, res) => {
     data,
     include: eventInclude(),
   });
+
+  // Comunica alterações relevantes aos participantes inscritos (sem spam:
+  // só notifica quando houve mudança real de data/hora/local).
+  const dayStr = (v) => (v ? new Date(v).toISOString().slice(0, 10) : null);
+  const changes = [];
+  if (data.startDate !== undefined && dayStr(event.startDate) !== dayStr(existing.startDate)) {
+    changes.push(`data de início (${dayStr(existing.startDate)} → ${dayStr(event.startDate)})`);
+  }
+  if (data.endDate !== undefined && dayStr(event.endDate) !== dayStr(existing.endDate)) {
+    changes.push(`data de término (${dayStr(existing.endDate)} → ${dayStr(event.endDate)})`);
+  }
+  if (data.startTime !== undefined && (event.startTime || null) !== (existing.startTime || null)) {
+    changes.push(`horário (${existing.startTime || '—'} → ${event.startTime || '—'})`);
+  }
+  if (data.location !== undefined && (event.location || null) !== (existing.location || null)) {
+    changes.push(`local (${existing.location || '—'} → ${event.location || '—'})`);
+  }
+  if (changes.length > 0) {
+    const registrations = await prisma.registration.findMany({
+      where: { eventId: id, status: 'CONFIRMED' },
+      select: { userId: true },
+    });
+    await Promise.all(
+      registrations.map((r) =>
+        createNotification({
+          userId: r.userId,
+          type: 'EVENT',
+          title: 'Evento atualizado',
+          message: `O evento "${event.name}" foi atualizado: ${changes.join('; ')}.`,
+          link: `/eventos/${event.slug || event.id}`,
+        })
+      )
+    );
+  }
 
   await createAuditLog({ userId: req.user.id, action: 'EVENT_UPDATED', resource: 'Event', resourceId: id, ip: req.ip });
   return apiResponse(res, { message: 'Evento atualizado com sucesso.', data: { event: enrichEvent(event) } });

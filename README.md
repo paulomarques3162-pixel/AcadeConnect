@@ -40,7 +40,7 @@ Identidade visual **própria** (AcadeConnect). Não copia logotipo, marca ou lay
 ## 📁 Estrutura do projeto
 
 ```
-academica/
+./
 ├── package.json               # Scripts orquestrados (dev, build, prisma...)
 ├── README.md
 ├── .gitignore

@@ -20,7 +20,10 @@ export default function Certificados() {
 
   if (loading) return <Spinner text="Carregando certificados..." />;
   if (error) return <ErrorState onRetry={reload} />;
-  const certificates = data || [];
+  // Versões válidas primeiro; canceladas por último.
+  const certificates = [...(data || [])].sort(
+    (a, b) => (a.status === 'CANCELLED' ? 1 : 0) - (b.status === 'CANCELLED' ? 1 : 0)
+  );
 
   return (
     <>

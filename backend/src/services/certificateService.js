@@ -57,7 +57,8 @@ export async function issueEventCertificate(registrationId, opts = {}) {
   if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
 
   const { event } = registration;
-  const existing = registration.certificates.find((c) => c.activityId === null);
+  // Ignora versões canceladas: uma correção pode emitir uma nova versão válida.
+  const existing = registration.certificates.find((c) => c.activityId === null && c.status !== 'CANCELLED');
   if (existing) return existing; // already issued
 
   const hours = event.certificateHours || 0;
@@ -108,7 +109,7 @@ export async function issueActivityCertificate(registrationId, activityId, opts 
   });
   if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
 
-  const existing = registration.certificates.find((c) => c.activityId === activityId);
+  const existing = registration.certificates.find((c) => c.activityId === activityId && c.status !== 'CANCELLED');
   if (existing) return existing;
 
   const attended = registration.attendance.some((a) => a.activityId === activityId && a.status === 'PRESENT');
@@ -139,7 +140,22 @@ export async function issueActivityCertificate(registrationId, activityId, opts 
 /**
  * Core certificate creation: unique code + PDF + QR pointing to validation page.
  */
-async function createCertificate({ userId, eventId, registrationId, activityId, hours, participantName, eventName, eventDate, activityName = null, responsible = null, operatorId = null }) {
+async function createCertificate({
+  userId,
+  eventId,
+  registrationId,
+  activityId,
+  hours,
+  participantName,
+  eventName,
+  eventDate,
+  activityName = null,
+  responsible = null,
+  operatorId = null,
+  correctionOfId = null,
+  storeOverrides = false,
+  notificationOverride = null,
+}) {
   // Generate a guaranteed-unique code.
   let code = generateCertificateCode();
   for (let i = 0; i < 5; i += 1) {
@@ -177,15 +193,18 @@ async function createCertificate({ userId, eventId, registrationId, activityId, 
       hours,
       pdfUrl: filename,
       status: 'AVAILABLE',
+      ...(correctionOfId ? { correctionOfId } : {}),
+      // Guarda os dados corrigidos como override (usados na exibição/PDF).
+      ...(storeOverrides ? { participantName, eventName } : {}),
     },
   });
 
   await createNotification({
     userId,
     type: 'CERTIFICATE',
-    title: 'Certificado disponível',
-    message: `Seu certificado do evento "${eventName}" está disponível.`,
-    link: '/certificados',
+    title: notificationOverride?.title || 'Certificado disponível',
+    message: notificationOverride?.message || `Seu certificado do evento "${eventName}" está disponível.`,
+    link: notificationOverride?.link || '/certificados',
   });
 
   if (env.emailEnabled) {
@@ -233,7 +252,7 @@ export async function autoIssueCertificatesForEvent(eventId) {
       select: { registrationId: true, status: true },
     }),
     prisma.certificate.findMany({
-      where: { registrationId: { in: regIds }, activityId: null },
+      where: { registrationId: { in: regIds }, activityId: null, status: { not: 'CANCELLED' } },
       select: { registrationId: true },
     }),
   ]);
@@ -264,6 +283,78 @@ export async function autoIssueCertificatesForEvent(eventId) {
     }
   }
   return { issued };
+}
+
+/**
+ * Corrige um certificado já emitido (erro de digitação).
+ * Preserva o histórico: a versão anterior é marcada como CANCELLED (não é
+ * apagada) e uma nova versão é emitida, vinculada à original. O usuário é
+ * notificado com destaque.
+ */
+export async function correctCertificate(certificateId, { participantName, eventName, hours, reason, operatorId = null } = {}) {
+  const original = await prisma.certificate.findUnique({
+    where: { id: certificateId },
+    include: {
+      user: { select: { id: true, name: true } },
+      event: { include: { organizer: { select: { name: true } } } },
+      activity: true,
+    },
+  });
+  if (!original) throw new ApiError(404, 'Certificado não encontrado.');
+  if (original.status === 'CANCELLED' || original.invalidatedAt) {
+    throw new ApiError(409, 'Este certificado já foi cancelado/substituído por uma correção.');
+  }
+
+  const correctedName = (participantName && String(participantName).trim()) || original.participantName || original.user.name;
+  const correctedEvent = (eventName && String(eventName).trim()) || original.eventName || original.event.name;
+  const correctedHours =
+    hours !== undefined && hours !== null && hours !== '' ? Number(hours) : original.hours;
+
+  const newCertificate = await createCertificate({
+    userId: original.userId,
+    eventId: original.eventId,
+    registrationId: original.registrationId,
+    activityId: original.activityId,
+    hours: correctedHours,
+    participantName: correctedName,
+    eventName: correctedEvent,
+    eventDate: original.activity?.date || original.event.startDate,
+    activityName: original.activity?.name || null,
+    responsible: original.event.organizer?.name || null,
+    operatorId,
+    correctionOfId: original.id,
+    storeOverrides: true,
+    notificationOverride: {
+      title: 'Seu certificado foi corrigido',
+      message: `Um administrador corrigiu seu certificado do evento "${correctedEvent}". A versão anterior foi cancelada e uma nova versão corrigida está disponível.`,
+      link: '/certificados',
+    },
+  });
+
+  const previous = await prisma.certificate.update({
+    where: { id: original.id },
+    data: {
+      status: 'CANCELLED',
+      invalidatedAt: new Date(),
+      correctionReason: reason ? String(reason).trim() : 'Correção de dados',
+      correctedById: operatorId || null,
+      correctedAt: new Date(),
+    },
+  });
+
+  await createAuditLog({
+    userId: operatorId,
+    action: 'CERTIFICATE_CORRECTED',
+    resource: 'Certificate',
+    resourceId: original.id,
+    details: {
+      newCertificateId: newCertificate.id,
+      newCode: newCertificate.code,
+      reason: reason ? String(reason).trim() : null,
+    },
+  });
+
+  return { previous, certificate: newCertificate };
 }
 
 

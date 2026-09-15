@@ -35,6 +35,28 @@ export async function listRaffles({ eventId } = {}) {
   });
 }
 
+/**
+ * Resultados públicos dos sorteios (sem controles administrativos).
+ * Qualquer usuário autenticado pode consultar.
+ */
+export async function listPublicResults({ eventId } = {}) {
+  return prisma.raffle.findMany({
+    where: { ...(eventId ? { eventId } : {}) },
+    select: {
+      id: true,
+      prize: true,
+      status: true,
+      createdAt: true,
+      event: { select: { id: true, name: true } },
+      winners: {
+        select: { id: true, prizeSnapshot: true, drawnAt: true, user: { select: { name: true } } },
+        orderBy: { drawnAt: 'desc' },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
 export async function getRaffle(id) {
   const raffle = await prisma.raffle.findUnique({
     where: { id },

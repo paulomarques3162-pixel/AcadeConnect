@@ -51,6 +51,7 @@ const Cupons = lazy(() => import('./pages/Cupons'));
 const MeusPedidos = lazy(() => import('./pages/MeusPedidos'));
 const MeusPagamentos = lazy(() => import('./pages/MeusPagamentos'));
 const Comunicacao = lazy(() => import('./pages/Comunicacao'));
+const Sorteios = lazy(() => import('./pages/Sorteios'));
 
 function PageLoader() {
   return <div className="route-loading"><Spinner text="Carregando..." /></div>;
@@ -93,6 +94,7 @@ export default function App() {
             <Route path="/meus-pedidos" element={<MeusPedidos />} />
             <Route path="/meus-pagamentos" element={<MeusPagamentos />} />
             <Route path="/comunicacao" element={<Comunicacao />} />
+            <Route path="/sorteios" element={<Sorteios />} />
           </Route>
         </Route>
 

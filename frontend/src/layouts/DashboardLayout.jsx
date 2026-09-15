@@ -1,15 +1,17 @@
-import { Outlet, Link, NavLink } from 'react-router-dom';
-import { CalendarCheck, Ticket, FileText, User, LogOut, Home, ShoppingBag, Package, CreditCard, MessagesSquare, Tag } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Outlet, Link, NavLink, useNavigate } from 'react-router-dom';
+import { CalendarCheck, Ticket, FileText, User, LogOut, Home, ShoppingBag, Package, CreditCard, MessagesSquare, Tag, Trophy } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { useTheme } from '../context/ThemeContext';
 import { Moon, Sun } from 'lucide-react';
+import { conversationApi } from '../api/services';
 
 const LINKS = [
   { to: '/minha-area', label: 'Minha área', icon: Home },
   { to: '/minhas-inscricoes', label: 'Minhas inscrições', icon: Ticket },
   { to: '/certificados', label: 'Certificados', icon: FileText },
+  { to: '/sorteios', label: 'Sorteios / Resultados', icon: Trophy },
   { to: '/loja', label: 'Loja', icon: ShoppingBag },
   { to: '/cupons', label: 'Cupons', icon: Tag },
   { to: '/meus-pedidos', label: 'Meus pedidos', icon: Package },
@@ -22,6 +24,19 @@ export function DashboardLayout() {
   const { user, logout, isStaff } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const [unreadMsgs, setUnreadMsgs] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    const load = () =>
+      conversationApi
+        .unreadCount()
+        .then((r) => active && setUnreadMsgs(r.data?.unread || 0))
+        .catch(() => {});
+    load();
+    const timer = setInterval(load, 60000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
 
   const handleLogout = async () => {
     await logout();
@@ -36,6 +51,9 @@ export function DashboardLayout() {
           {LINKS.map((l) => (
             <NavLink key={l.to} to={l.to} end={l.to === '/minha-area'} className={({ isActive }) => `dash-link ${isActive ? 'is-active' : ''}`}>
               <l.icon size={19} /> {l.label}
+              {l.to === '/comunicacao' && unreadMsgs > 0 && (
+                <span className="badge badge--danger" style={{ marginLeft: 'auto' }}>{unreadMsgs}</span>
+              )}
             </NavLink>
           ))}
           {isStaff && (

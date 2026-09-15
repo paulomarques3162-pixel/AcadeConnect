@@ -79,6 +79,7 @@ enum CertificateStatus {
   PENDING
   AVAILABLE
   ISSUED
+  CANCELLED
 }
 
 enum NotificationType {
@@ -170,6 +171,7 @@ model User {
   notifications       Notification[]
   audits              AuditLog[]
   organizedEvents     Event[]           @relation("EventOrganizer")
+  correctedCertificates Certificate[]   @relation("CertificateCorrector")
   payments            Payment[]         @relation("PaymentUser")
   paymentsConfirmed   Payment[]         @relation("PaymentConfirmer")
   orders              Order[]
@@ -354,12 +356,26 @@ model Certificate {
   status         CertificateStatus @default(AVAILABLE)
   createdAt      DateTime          @default(now())
 
+  // Correção administrativa (erro de digitação) — preserva histórico/rastreabilidade.
+  invalidatedAt    DateTime?
+  correctionOfId   String?
+  correctionReason String?
+  correctedById    String?
+  correctedAt      DateTime?
+  // Overrides de dados corrigidos (usados no PDF quando presentes).
+  participantName  String?
+  eventName        String?
+
   user         User      @relation(fields: [userId], references: [id])
   event        Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
   registration Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
   activity     Activity? @relation(fields: [activityId], references: [id])
+  correctedBy     User?         @relation("CertificateCorrector", fields: [correctedById], references: [id])
+  correctionOf    Certificate?  @relation("CertificateCorrection", fields: [correctionOfId], references: [id])
+  corrections     Certificate[] @relation("CertificateCorrection")
 
-  @@unique([userId, eventId, activityId])
+  // Várias versões (original + correções) podem coexistir para o mesmo usuário/evento.
+  @@index([userId, eventId, activityId])
   @@index([code])
 }
 

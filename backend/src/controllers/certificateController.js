@@ -4,7 +4,7 @@ import { ApiError } from '../utils/apiError.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { publicUrl } from '../config/multer.js';
-import { issueEventCertificate, issueActivityCertificate, autoIssueCertificatesForEvent } from '../services/certificateService.js';
+import { issueEventCertificate, issueActivityCertificate, autoIssueCertificatesForEvent, correctCertificate as correctCertificateService } from '../services/certificateService.js';
 import { createAuditLog } from '../services/auditLogService.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,6 +12,7 @@ import path from 'node:path';
 const certInclude = {
   event: { select: { id: true, name: true, startDate: true, institution: { select: { name: true } } } },
   activity: { select: { id: true, name: true } },
+  user: { select: { id: true, name: true, email: true } },
 };
 
 export const getMyCertificates = asyncHandler(async (req, res) => {
@@ -76,14 +77,21 @@ export const validateCertificate = asyncHandler(async (req, res) => {
     },
   });
   if (!certificate) throw new ApiError(404, 'Certificado não encontrado. Verifique o código.');
+  if (certificate.status === 'CANCELLED') {
+    throw new ApiError(
+      409,
+      'Este certificado foi cancelado e substituído por uma versão corrigida. Verifique o código da versão mais recente.'
+    );
+  }
 
   return apiResponse(res, {
     message: 'Certificado válido.',
     data: {
       valid: true,
       code: certificate.code,
-      participantName: certificate.user.name,
-      eventName: certificate.event.name,
+      // Em certificados corrigidos, usa os dados corrigidos (override).
+      participantName: certificate.participantName || certificate.user.name,
+      eventName: certificate.eventName || certificate.event.name,
       institutionName: certificate.event.institution?.name || null,
       activityName: certificate.activity?.name || null,
       hours: certificate.hours,
@@ -135,4 +143,23 @@ export const runAutoIssue = asyncHandler(async (req, res) => {
   const { eventId } = req.params;
   const result = await autoIssueCertificatesForEvent(eventId);
   return apiResponse(res, { message: 'Geração automática concluída.', data: result });
+});
+
+/**
+ * Corrige um certificado emitido (erro de digitação). Cancela a versão anterior
+ * (sem apagar) e emite uma nova, notificando o usuário.
+ */
+export const correctCertificate = asyncHandler(async (req, res) => {
+  const result = await correctCertificateService(req.params.id, {
+    participantName: req.body.participantName,
+    eventName: req.body.eventName,
+    hours: req.body.hours,
+    reason: req.body.reason,
+    operatorId: req.user.id,
+  });
+  return apiResponse(res, {
+    status: 201,
+    message: 'Certificado corrigido. A versão anterior foi cancelada e uma nova versão foi emitida.',
+    data: result,
+  });
 });

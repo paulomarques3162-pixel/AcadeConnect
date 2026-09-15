@@ -2,10 +2,23 @@ import QRCode from 'react-qr-code';
 import { Calendar, MapPin, Users, ArrowRight, Clock, Award } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { StatusBadge, SmartImage } from './ui';
-import { formatDate, ACTIVITY_TYPE_LABELS, formatNumber } from '../utils/format';
+import { formatDate, ACTIVITY_TYPE_LABELS, formatNumber, calendarDayKey, todayKey } from '../utils/format';
+
+/** Dias (calendário) entre hoje e uma data-alvo. */
+function daysUntil(value) {
+  if (!value) return null;
+  const diff = new Date(`${calendarDayKey(value)}T00:00:00Z`).getTime() - new Date(`${todayKey()}T00:00:00Z`).getTime();
+  return Math.round(diff / 86400000);
+}
 
 export function EventCard({ event }) {
   const banner = event.bannerUrl || null;
+  const startKey = calendarDayKey(event.startDate);
+  const endKey = calendarDayKey(event.endDate);
+  const isToday = startKey === todayKey();
+  const isEnded = event.status === 'CLOSED' || (endKey && endKey < todayKey());
+  const closingDays = daysUntil(event.registrationEnd);
+  const closingSoon = !isEnded && closingDays !== null && closingDays >= 0 && closingDays <= 3;
   return (
     <article className="event-card">
       <div className="event-card__banner">
@@ -20,6 +33,13 @@ export function EventCard({ event }) {
       </div>
       <div className="event-card__body">
         <h3 className="event-card__title">{event.name}</h3>
+        {(isToday || isEnded || closingSoon) && (
+          <div className="flex flex-wrap mb-1" style={{ gap: 6 }}>
+            {isToday && !isEnded && <span className="badge badge--danger">Evento hoje</span>}
+            {closingSoon && <span className="badge badge--warning">Inscrição encerrando</span>}
+            {isEnded && <span className="badge badge--neutral">Evento encerrado</span>}
+          </div>
+        )}
         <p className="event-card__desc">{event.shortDescription || 'Evento acadêmico.'}</p>
         <div className="event-card__meta">
           <span><Calendar size={15} /> {formatDate(event.startDate)} — {formatDate(event.endDate)}</span>
@@ -80,13 +100,19 @@ export function QRCodeCard({ value, label }) {
 }
 
 export function CertificateCard({ certificate }) {
+  const cancelled = certificate.status === 'CANCELLED';
   return (
-    <div className="cert-card">
+    <div className="cert-card" style={cancelled ? { opacity: 0.85, borderStyle: 'dashed' } : undefined}>
       <div className="cert-card__icon"><Award size={28} /></div>
       <div className="cert-card__body">
-        <h4>{certificate.event?.name || 'Evento'}</h4>
+        <h4>{certificate.eventName || certificate.event?.name || 'Evento'}</h4>
         <p>{certificate.activity?.name ? `Atividade: ${certificate.activity.name}` : 'Participação no evento'}</p>
         <p className="cert-card__meta">Código: <strong>{certificate.code}</strong> · {formatNumber(certificate.hours)}h</p>
+        {cancelled && (
+          <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '0.8rem' }}>
+            Versão cancelada (correção de dados) — utilize a versão válida mais recente.
+          </p>
+        )}
       </div>
       <StatusBadge status={certificate.status} />
     </div>

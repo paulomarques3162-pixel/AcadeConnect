@@ -197,6 +197,15 @@ export const certificateSchemas = {
       force: Joi.boolean().default(false),
     }),
   },
+  correct: {
+    params: Joi.object({ id: Joi.string().required() }),
+    body: Joi.object({
+      participantName: Joi.string().trim().min(2).max(150).allow('', null),
+      eventName: Joi.string().trim().min(2).max(200).allow('', null),
+      hours: Joi.number().min(0).allow(null, ''),
+      reason: Joi.string().trim().max(300).allow('', null),
+    }),
+  },
   codeParam: { params: Joi.object({ code: Joi.string().required() }) },
   idParam: { params: Joi.object({ id: Joi.string().required() }) },
 };

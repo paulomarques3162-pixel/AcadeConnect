@@ -113,6 +113,7 @@ export const certificateApi = {
   downloadUrl: (id) => `${API_BASE_URL.replace(/\/$/, '')}/certificates/${id}/download`,
   validate: (code) => api.get(`/certificates/validate/${code}`).then(unwrap),
   issue: (data) => api.post('/certificates/issue', data).then(unwrap),
+  correct: (id, data) => api.post(`/certificates/${id}/correct`, data).then(unwrap),
   auto: (eventId) => api.post(`/certificates/auto/${eventId}`).then(unwrap),
   adminList: (params) => api.get('/certificates/admin/list', { params }).then(unwrap),
 };
@@ -160,6 +161,7 @@ export const paymentApi = {
 
 // ---- Raffles (admin) ----
 export const raffleApi = {
+  results: (params) => api.get('/raffles/results', { params }).then(unwrap),
   list: (params) => api.get('/raffles', { params }).then(unwrap),
   get: (id) => api.get(`/raffles/${id}`).then(unwrap),
   eligible: (id) => api.get(`/raffles/${id}/eligible`).then(unwrap),
@@ -216,11 +218,13 @@ export const conversationApi = {
   admins: () => api.get('/conversations/admins').then(unwrap),
   mine: () => api.get('/conversations/mine').then(unwrap),
   adminList: (params) => api.get('/conversations/admin/list', { params }).then(unwrap),
+  adminStart: (data) => api.post('/conversations/admin/start', data).then(unwrap),
   get: (id) => api.get(`/conversations/${id}`).then(unwrap),
   start: (data) => api.post('/conversations', data).then(unwrap),
   send: (id, body) => api.post(`/conversations/${id}/messages`, { body }).then(unwrap),
   setStatus: (id, status) => api.post(`/conversations/${id}/status`, { status }).then(unwrap),
   markRead: (id) => api.post(`/conversations/${id}/read`).then(unwrap),
+  unreadCount: () => api.get('/conversations/unread-count').then(unwrap),
 };
 
 export const exportCsv = async (type, body) => {

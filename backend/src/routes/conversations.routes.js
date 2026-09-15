@@ -9,7 +9,9 @@ router.use(authenticate);
 
 router.get('/admins', ctrl.admins);
 router.get('/mine', ctrl.mine);
+router.get('/unread-count', ctrl.unreadCount);
 router.get('/admin/list', authorize('ADMIN', 'ORGANIZER'), ctrl.adminList);
+router.post('/admin/start', authorize('ADMIN', 'ORGANIZER'), validate(conversationSchemas.adminStart), ctrl.adminStart);
 router.post('/', validate(conversationSchemas.start), ctrl.start);
 router.get('/:id', validate(conversationSchemas.idParam), ctrl.getOne);
 router.post('/:id/messages', validate(conversationSchemas.message), ctrl.send);

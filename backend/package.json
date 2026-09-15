@@ -9,8 +9,9 @@
   },
   "scripts": {
     "dev": "nodemon --watch src --exec node src/server.js",
-    "start": "node src/server.js",
-    "build": "echo 'Backend has no build step; run start or dev'",
+    "start": "npm run prisma:migrate:deploy && node src/server.js",
+    "build": "prisma generate",
+    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
@@ -18,8 +19,7 @@
     "prisma:studio": "prisma studio",
     "prisma:push": "prisma db push",
     "check:role": "node scripts/check-user-role.js",
-    "set:role": "node scripts/set-user-role.js",
-    "create:admins": "node scripts/create-admins.js"
+    "set:role": "node scripts/set-user-role.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

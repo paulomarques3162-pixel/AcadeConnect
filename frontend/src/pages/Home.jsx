@@ -15,7 +15,7 @@ const FEATURES = [
 
 export default function Home() {
   const navigate = useNavigate();
-  const { data, loading, error } = useApi(() => eventApi.list({ limit: 3, status: 'OPEN' }).then((r) => r.data.events), []);
+  const { data, loading, error, reload } = useApi(() => eventApi.list({ limit: 3, status: 'OPEN' }).then((r) => r.data.events), []);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -70,7 +70,7 @@ export default function Home() {
             <h2>Próximos eventos</h2>
           </div>
           {loading && <Spinner text="Carregando eventos..." />}
-          {error && <ErrorState title="Não foi possível carregar os eventos." description="Tente novamente em instantes." onRetry={() => window.location.reload()} />}
+          {error && <ErrorState title="Não foi possível carregar os eventos." description="Tente novamente em instantes." onRetry={reload} />}
           {!loading && !error && (
             <>
               <div className="grid">

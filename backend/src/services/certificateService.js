@@ -55,7 +55,15 @@ export async function issueEventCertificate(registrationId, opts = {}) {
     },
   });
   if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
+  return issueEventCertificateFromLoaded(registration, { operatorId, force });
+}
 
+/**
+ * Same as above but using an already-loaded registration (with user, event,
+ * activityRegistrations, attendance and certificates included). Used by the
+ * bulk path so it does NOT re-query per participant (N+1 fix).
+ */
+async function issueEventCertificateFromLoaded(registration, { operatorId = null, force = false } = {}) {
   const { event } = registration;
   // Ignora versões canceladas: uma correção pode emitir uma nova versão válida.
   const existing = registration.certificates.find((c) => c.activityId === null && c.status !== 'CANCELLED');
@@ -90,6 +98,7 @@ export async function issueEventCertificate(registrationId, opts = {}) {
     activityId: null,
     hours,
     participantName: registration.user.name,
+    participantEmail: registration.user.email,
     eventName: event.name,
     eventDate: event.startDate,
     responsible: event.organizer?.name || null,
@@ -129,6 +138,7 @@ export async function issueActivityCertificate(registrationId, activityId, opts 
     activityId,
     hours,
     participantName: registration.user.name,
+    participantEmail: registration.user.email,
     eventName: registration.event.name,
     eventDate: activity?.date || registration.event.startDate,
     activityName: activity?.name || null,
@@ -147,6 +157,7 @@ async function createCertificate({
   activityId,
   hours,
   participantName,
+  participantEmail = null,
   eventName,
   eventDate,
   activityName = null,
@@ -181,7 +192,7 @@ async function createCertificate({
   fs.mkdirSync(uploadsRoot, { recursive: true });
   const filename = `certificado-${code}.pdf`;
   const pdfPath = path.join(uploadsRoot, filename);
-  fs.writeFileSync(pdfPath, pdf);
+  await fs.promises.writeFile(pdfPath, pdf);
 
   const certificate = await prisma.certificate.create({
     data: {
@@ -207,9 +218,9 @@ async function createCertificate({
     link: notificationOverride?.link || '/certificados',
   });
 
-  if (env.emailEnabled) {
+  if (env.emailEnabled && participantEmail) {
     const tpl = emailTemplates.certificate(participantName, eventName, code, validationUrl);
-    await sendEmail({ to: (await prisma.user.findUnique({ where: { id: userId } })).email, ...tpl });
+    await sendEmail({ to: participantEmail, ...tpl });
   }
 
   await createAuditLog({
@@ -223,8 +234,18 @@ async function createCertificate({
   return certificate;
 }
 
+// Bound the amount of registration rows loaded per batch during mass issuance.
+const ISSUE_BATCH_SIZE = 50;
+
 /**
  * Run automatic certificate generation for all eligible registrations of an event.
+ *
+ * Concurrency/performance notes:
+ *  - Eligibility is computed with ONE batched query set (no per-registration N+1).
+ *  - Registrations are then loaded in bounded batches (instead of one heavy
+ *    include query per participant), so memory stays flat on large events.
+ *  - The operation is intentionally sequential inside the batch to avoid
+ *    saturating the PDF generator / event loop.
  */
 export async function autoIssueCertificatesForEvent(eventId) {
   const event = await prisma.event.findUnique({
@@ -257,9 +278,6 @@ export async function autoIssueCertificatesForEvent(eventId) {
     }),
   ]);
 
-  // reqCount = atividades exigidas em que o participante está inscrito
-  // present  = presenças registradas nessas mesmas atividades
-  // (mesma fórmula/regra de antes, apenas calculada em memória)
   const reqCountByReg = new Map();
   for (const ar of activityRegs) {
     reqCountByReg.set(ar.registrationId, (reqCountByReg.get(ar.registrationId) || 0) + 1);
@@ -271,19 +289,41 @@ export async function autoIssueCertificatesForEvent(eventId) {
   }
   const hasCert = new Set(existingCerts.map((c) => c.registrationId));
 
-  let issued = 0;
+  // Participants that pass the attendance threshold and still need a certificate.
+  const toIssue = [];
   let skipped = 0;
   let notEligible = 0;
   for (const reg of eligibleRegs) {
-    // Já possui certificado válido -> não duplica.
     if (hasCert.has(reg.id)) { skipped += 1; continue; }
     const reqCount = reqCountByReg.get(reg.id) || 0;
     const present = presentByReg.get(reg.id) || 0;
     const percentage = reqCount === 0 ? 0 : Math.round((present / reqCount) * 100);
     if (reqCount === 0 || percentage < event.minimumAttendancePercentage) { notEligible += 1; continue; }
-    await issueEventCertificate(reg.id);
-    issued += 1;
+    toIssue.push(reg.id);
   }
+
+  let issued = 0;
+  for (let i = 0; i < toIssue.length; i += ISSUE_BATCH_SIZE) {
+    const batchIds = toIssue.slice(i, i + ISSUE_BATCH_SIZE);
+    // One query per batch instead of one per participant.
+    // eslint-disable-next-line no-await-in-loop
+    const loaded = await prisma.registration.findMany({
+      where: { id: { in: batchIds } },
+      include: {
+        user: true,
+        event: { include: { organizer: { select: { name: true } } } },
+        activityRegistrations: { include: { activity: true } },
+        attendance: true,
+        certificates: true,
+      },
+    });
+    for (const reg of loaded) {
+      // eslint-disable-next-line no-await-in-loop
+      await issueEventCertificateFromLoaded(reg, {});
+      issued += 1;
+    }
+  }
+
   return { issued, skipped, notEligible };
 }
 
@@ -334,7 +374,7 @@ export async function correctCertificate(certificateId, { participantName, event
   const original = await prisma.certificate.findUnique({
     where: { id: certificateId },
     include: {
-      user: { select: { id: true, name: true } },
+      user: { select: { id: true, name: true, email: true } },
       event: { include: { organizer: { select: { name: true } } } },
       activity: true,
     },
@@ -356,6 +396,7 @@ export async function correctCertificate(certificateId, { participantName, event
     activityId: original.activityId,
     hours: correctedHours,
     participantName: correctedName,
+    participantEmail: original.user.email,
     eventName: correctedEvent,
     eventDate: original.activity?.date || original.event.startDate,
     activityName: original.activity?.name || null,
@@ -395,5 +436,3 @@ export async function correctCertificate(certificateId, { participantName, event
 
   return { previous, certificate: newCertificate };
 }
-
-

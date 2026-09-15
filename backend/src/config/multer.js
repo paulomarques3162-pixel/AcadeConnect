@@ -37,6 +37,10 @@ export const upload = multer({
 
 export function publicUrl(filename) {
   if (!filename) return null;
+  // Idempotent: values already stored as absolute URLs are returned untouched.
+  // This matters for cached payloads, where enrich() runs again on values that
+  // were already enriched (otherwise the origin would be duplicated).
+  if (/^https?:\/\//i.test(filename)) return filename;
   // apiUrl ends with "/api", but files are served statically at "/uploads".
   // Derive the origin from API_URL (or UPLOADS_BASE_URL) and append /uploads.
   let origin = env.uploadsBaseUrl;

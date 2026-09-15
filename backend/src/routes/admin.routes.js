@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { validate } from '../middlewares/validate.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
+import { heavyLimiter } from '../middlewares/rateLimiter.js';
 import { adminUserSchemas, institutionSchemas, exportSchemas } from '../validations/schemas.js';
 import * as ctrl from '../controllers/adminController.js';
 import * as reportCtrl from '../controllers/reportController.js';
@@ -34,6 +35,6 @@ router.get('/logs', ctrl.listAuditLogs);
 router.get('/reports', reportCtrl.reports);
 
 // Export
-router.post('/export/:type', validate(exportSchemas), exportCtrl.exportData);
+router.post('/export/:type', heavyLimiter, validate(exportSchemas), exportCtrl.exportData);
 
 export default router;

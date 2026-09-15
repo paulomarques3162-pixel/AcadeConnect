@@ -9,6 +9,29 @@ import { createAuditLog } from '../services/auditLogService.js';
 import { createNotification } from '../services/notificationService.js';
 import { sendEmail, emailTemplates } from '../services/emailService.js';
 import { createPayment } from '../services/paymentService.js';
+import { invalidate } from '../utils/cache.js';
+
+// Public event detail/list include registration counts; a new/cancelled
+// registration can change them, so drop the cached copies.
+const EVENTS_CACHE_PREFIX = 'events:';
+
+/**
+ * Retry a serializable transaction when Postgres reports a serialization
+ * failure (P2034). This is the mechanism that prevents two participants from
+ * taking the last seat at the same instant.
+ */
+async function withSerializableRetry(fn, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await prisma.$transaction(fn, { isolationLevel: 'Serializable' });
+    } catch (err) {
+      lastErr = err;
+      if (err?.code !== 'P2034') throw err;
+    }
+  }
+  throw lastErr;
+}
 
 const registrationInclude = {
   // O dono da inscrição (para a tela de detalhe não depender do usuário logado).
@@ -52,31 +75,13 @@ export const registerForEvent = asyncHandler(async (req, res) => {
     throw new ApiError(409, 'O prazo de inscrição já se encerrou.');
   }
 
-  // Rule: no duplicate registration.
-  const existing = await prisma.registration.findUnique({
-    where: { userId_eventId: { userId, eventId } },
-  });
-  if (existing) throw new ApiError(409, 'Você já está inscrito neste evento.');
-
-  // Rule: capacity.
-  if (event.capacity) {
-    const count = await prisma.registration.count({
-      where: { eventId, status: { in: ['PENDING', 'CONFIRMED'] } },
-    });
-    if (count >= event.capacity) throw new ApiError(409, 'As vagas deste evento estão esgotadas.');
-  }
-
-  // Validate selected activities belong to event & have capacity.
+  // Static activity rules (no concurrency implications).
   const validActivities = event.activities.filter((a) => activityIds.includes(a.id));
   if (event.requireActivityRegistration && validActivities.length === 0) {
     throw new ApiError(409, 'Selecione ao menos uma atividade para se inscrever neste evento.');
   }
   for (const a of validActivities) {
     if (!a.allowsRegistration) throw new ApiError(409, `A atividade "${a.name}" não aceita inscrição.`);
-    if (a.capacity) {
-      const count = await prisma.activityRegistration.count({ where: { activityId: a.id, status: 'CONFIRMED' } });
-      if (count >= a.capacity) throw new ApiError(409, `A atividade "${a.name}" está lotada.`);
-    }
   }
 
   // Generate unique registration code.
@@ -89,19 +94,48 @@ export const registerForEvent = asyncHandler(async (req, res) => {
   }
   const qrToken = generateQrToken();
 
-  const registration = await prisma.registration.create({
-    data: {
-      code,
-      qrToken,
-      userId,
-      eventId,
-      status: 'CONFIRMED',
-      activityRegistrations: {
-        create: validActivities.map((a) => ({ activityId: a.id, status: 'CONFIRMED' })),
+  // Duplicate + capacity checks and the INSERT run in ONE serializable
+  // transaction, so two users racing for the last seat cannot both succeed.
+  const registration = await withSerializableRetry(async (tx) => {
+    // Rule: no duplicate registration.
+    const existing = await tx.registration.findUnique({
+      where: { userId_eventId: { userId, eventId } },
+    });
+    if (existing) throw new ApiError(409, 'Você já está inscrito neste evento.');
+
+    // Rule: event capacity (re-read inside the transaction).
+    if (event.capacity) {
+      const count = await tx.registration.count({
+        where: { eventId, status: { in: ['PENDING', 'CONFIRMED'] } },
+      });
+      if (count >= event.capacity) throw new ApiError(409, 'As vagas deste evento estão esgotadas.');
+    }
+
+    // Rule: activity capacity (re-read inside the transaction).
+    for (const a of validActivities) {
+      if (a.capacity) {
+        // eslint-disable-next-line no-await-in-loop
+        const count = await tx.activityRegistration.count({ where: { activityId: a.id, status: 'CONFIRMED' } });
+        if (count >= a.capacity) throw new ApiError(409, `A atividade "${a.name}" está lotada.`);
+      }
+    }
+
+    return tx.registration.create({
+      data: {
+        code,
+        qrToken,
+        userId,
+        eventId,
+        status: 'CONFIRMED',
+        activityRegistrations: {
+          create: validActivities.map((a) => ({ activityId: a.id, status: 'CONFIRMED' })),
+        },
       },
-    },
-    include: registrationInclude,
+      include: registrationInclude,
+    });
   });
+
+  invalidate(EVENTS_CACHE_PREFIX);
 
   await createNotification({
     userId,
@@ -172,10 +206,12 @@ export const generatePayment = asyncHandler(async (req, res) => {
 });
 
 export const getMyRegistrations = asyncHandler(async (req, res) => {
+  const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 200);
   const registrations = await prisma.registration.findMany({
     where: { userId: req.user.id },
     include: registrationInclude,
     orderBy: { createdAt: 'desc' },
+    take,
   });
   return apiResponse(res, { message: 'Minhas inscrições.', data: { registrations } });
 });
@@ -221,6 +257,7 @@ export const cancelRegistration = asyncHandler(async (req, res) => {
     title: 'Inscrição cancelada',
     message: `Sua inscrição no evento "${registration.event.name}" foi cancelada.`,
   });
+  invalidate(EVENTS_CACHE_PREFIX);
   await createAuditLog({ userId: req.user.id, action: 'REGISTRATION_CANCELLED', resource: 'Registration', resourceId: registration.id, ip: req.ip });
   return apiResponse(res, { message: 'Inscrição cancelada.', data: { registration: updated } });
 });

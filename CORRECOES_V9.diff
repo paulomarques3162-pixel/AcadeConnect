@@ -1,0 +1,3392 @@
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/DOCUMENTACAO_V9.md ./DOCUMENTACAO_V9.md
+--- /tmp/v8orig/DOCUMENTACAO_V9.md	1970-01-01 00:00:00.000000000 +0000
++++ ./DOCUMENTACAO_V9.md	2026-09-15 22:39:57.270738668 +0000
+@@ -0,0 +1,103 @@
++# AcadeConnect / Mustangs Atlética — V9 (Performance e Concorrência)
++
++Esta versão corrige os gargalos de performance sob alto número de acessos **sem alterar o layout nem as funcionalidades**. O que mudou, como aplicar e como operar está abaixo.
++
++---
++
++## 1. Como aplicar
++
++```bash
++# backend — aplica SOMENTE a migration nova (aditiva, sem reset, sem perda de dados)
++cd backend
++npm install                 # instala a dependência nova (compression)
++npx prisma migrate deploy   # aplica 20260916000000_add_performance_indexes
++npx prisma generate
++
++# frontend
++cd ../frontend
++npm install
++npm run build
++```
++
++> A migration `20260916000000_add_performance_indexes` contém **apenas `CREATE INDEX IF NOT EXISTS`**. Não há `DROP`, `TRUNCATE`, `DELETE` nem alteração de tabela/coluna. Pode ser aplicada em banco populado com segurança.
++
++**Nunca** execute em produção: `prisma migrate reset`, `prisma db push --force-reset`, `DROP`, `TRUNCATE`.
++
++---
++
++## 2. Variáveis de ambiente novas (todas com default — opcionais)
++
++| Variável | Default | Para que serve |
++|---|---|---|
++| `PRISMA_CONNECTION_LIMIT` | `10` | Máx. de conexões simultâneas **deste processo**. **Não eleve sem medir.** |
++| `PRISMA_POOL_TIMEOUT` | `20` | Segundos de espera por conexão livre |
++| `PRISMA_CONNECT_TIMEOUT` | `10` | Segundos de espera do handshake |
++| `PRISMA_LOG_QUERIES` | `false` | Loga consultas lentas (diagnóstico; não usar verboso em prod) |
++| `PRISMA_SLOW_QUERY_MS` | `100` | Limiar para logar consulta lenta |
++| `PUBLIC_CACHE_TTL_MS` | `15000` | TTL do cache de dados públicos (eventos, loja, sorteios) |
++| `DASHBOARD_CACHE_TTL_MS` | `30000` | TTL do cache do dashboard do ADM |
++| `AUTH_USER_CACHE_MS` | `5000` | TTL do cache do usuário autenticado |
++| `COMPRESSION_ENABLED` | `true` | gzip para JSON/texto |
++| `COMPRESSION_THRESHOLD` | `1024` | Tamanho mínimo para comprimir |
++| `HEAVY_RATE_LIMIT_MAX` | `30` | Limite/min para endpoints pesados (export, certificado, pedido, PIX, inscrição) |
++| `STREAM_RATE_LIMIT_MAX` | `30` | Limite/min para abrir streams SSE |
++| `RATE_LIMIT_MAX` | `600` | Limite global da API por IP (era 300) |
++| `KEEP_ALIVE_TIMEOUT_MS` | `65000` | Keep-alive HTTP (proxy do Render) |
++| `HEADERS_TIMEOUT_MS` | `66000` | Timeout de headers |
++
++O arquivo `backend/.env.example` já documenta todas.
++
++---
++
++## 3. Tempo real (SSE)
++
++- `POST /api/realtime/token` (autenticado) → `{ token }` de **curta duração (2 min), escopo `stream`**.
++- `GET /api/realtime/stream?token=...` → stream `text/event-stream`.
++- Eventos: `connected`, `notification`, `message`, `conversation`.
++- O frontend usa **1 conexão por aba** (cliente singleton em `frontend/src/api/realtime.js`).
++- Fallback: se o SSE cair, o frontend reconecta com backoff e mantém o polling **incremental e adaptativo**, então a tela nunca fica incorreta.
++
++**Limitação importante:** o hub é **em processo**. Em uma instância (Render) atende todos. Se escalar horizontalmente, será preciso um broker compartilhado (ex.: Redis pub/sub); até lá o fallback cobre.
++
++---
++
++## 4. Cache (em memória)
++
++`backend/src/utils/cache.js` — TTL + **single-flight** (rajada idêntica = 1 consulta) + invalidação por prefixo.
++
++Usado em: eventos (lista/detalhe públicos), loja (produtos ativos), resultados públicos de sorteio, dashboard do ADM, usuário autenticado.
++
++Regras:
++- **Só** para dados que podem ficar alguns segundos desatualizados.
++- **Nunca** para dado privado por usuário (autorização continua exata).
++- Toda escrita relacionada invalida o prefixo correspondente.
++
++---
++
++## 5. Comportamento preservado (não mexer sem necessidade)
++
++Fluxos de **PIX** (EMV/CRC, chave, validade, regeneração), **QR de presença** (câmera/manual, dia da atividade, duplicidade), **inscrições**, **certificados** (emissão/correção/cancelamento/massa), **pedidos/estoque**, **sorteio** e **mensagens** mantêm a lógica funcional. As mudanças foram de eficiência (lotes, limites, transações), não de regra de negócio.
++
++---
++
++## 6. Diagnóstico em produção
++
++- Consultas lentas:
++  ```env
++  PRISMA_LOG_QUERIES=true
++  PRISMA_SLOW_QUERY_MS=100
++  ```
++  (desligar depois)
++- Health check: `GET /api/health` (não toca o banco, não consome rate limit).
++- Se o SSE não conectar atrás de algum proxy, o polling de fallback assume — verifique o console do navegador.
++
++---
++
++## 7. Testes incluídos
++
++```bash
++cd backend
++node scripts/test-performance.mjs   # 11 PASS / 0 FAIL (cache, pub-sub, tokens)
++```
++
++Os testes de integração de ponta a ponta (PIX, QR, pedidos, inscrições, certificados, mensagens) exigem PostgreSQL e devem ser rodados no ambiente de teste com os scripts já existentes do projeto.
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/PERFORMANCE_ANTES_DEPOIS.md ./PERFORMANCE_ANTES_DEPOIS.md
+--- /tmp/v8orig/PERFORMANCE_ANTES_DEPOIS.md	1970-01-01 00:00:00.000000000 +0000
++++ ./PERFORMANCE_ANTES_DEPOIS.md	2026-09-15 22:39:45.770597055 +0000
+@@ -0,0 +1,101 @@
++# Performance — Antes / Depois (V8 → V9)
++
++> **Transparência:** o ambiente de análise **não tinha PostgreSQL**, portanto **latência (p50/p95/p99), throughput (req/s) e erros HTTP não foram medidos** com carga real. Onde o número não foi medido, está escrito **“não medido”**.
++> Os números marcados como **medido** vêm de execução real nesta máquina (build de produção, testes unitários, smoke test). Os números marcados como **código** são derivados da leitura do fluxo (contagem de requests/consultas), não de teste de carga.
++
++---
++
++## 1. Tabela principal (formato solicitado)
++
++| Métrica | Antes | Depois |
++|---|---:|---:|
++| p50 | não medido | não medido |
++| p95 | não medido | não medido |
++| p99 | não medido | não medido |
++| Requests/s | não medido | não medido |
++| Erros | não medido | não medido |
++| Queries/request (dashboard) | ~10–12 por chamada | 0 no cache hit; ~10–12 no miss |
++| Queries/request (relatório) | 6 + carga ilimitada | 7 (sem carga ilimitada) |
++| Conexões DB | não medido (pool implícito) | pool explícito, padrão 10 |
++
++---
++
++## 2. Volume de requisições (derivado do código — cenário 200 abas)
++
++Cenário: 200 participantes com uma conversa aberta.
++
++| Fluxo | Antes (V8) | Depois (V9) | Redução estimada |
++|---|---:|---:|---:|
++| Refresh de mensagens | 12 req/min por aba → **~2.400 req/min** | SSE: **0** polls; fallback adaptativo ≥1/min por aba em ociosidade | **~92%+** (e cada request traz só o que mudou) |
++| Tamanho de cada refresh | thread inteira (cresce com o tempo) | apenas mensagens novas (de-dup por id) | proporcional ao histórico |
++| Intervalo ocioso | fixo 5s | 5s → até 60s (backoff) | — |
++| Aba em background | continuava | **pausado** | 100% em aba oculta |
++| Badge de não lidas | 1 req/min por usuário | SSE + 0,5 req/min (visível) / 0 (oculta) | ~50–100% |
++| Notificações (bell) | 1 carga no mount | SSE (push) + refresh no foco | — |
++
++---
++
++## 3. Trabalho no banco (derivado do código)
++
++| Operação | Antes (V8) | Depois (V9) |
++|---|---|---|
++| Notificar N inscritos de um evento | 1 SELECT + **N INSERTs** | 1 SELECT + **1 `createMany`** |
++| Notificar todos os admins (nova mensagem) | 1 SELECT + **N INSERTs** | 1 SELECT + **1 `createMany`** |
++| Relatório (`/admin/reports`) | `findMany` de **todas** as inscrições + presenças para somar em JS | `count` + `groupBy` no banco (nenhuma linha transportada) |
++| Resumo de presença por evento | carregava **todas** as presenças de todas as atividades | `groupBy` + projeção de 2 colunas |
++| Emissão massiva de certificados | 1 consulta pesada por participante (include de 5 relações) | 1 consulta por lote de 50 + email reaproveitado |
++| Listas (`* me`, produtos, sorteios, conversas…) | sem limite | `take` explícito |
++| Thread de conversa (carga inicial) | todos os históricos | últimas 200 mensagens |
++| Consulta do usuário autenticado | 1 por request protegido | cache 5s (invalidado em escrita) |
++| Rajada de requisições idênticas (público) | 1 consulta por requisição | **1 consulta total** (single-flight) |
++
++---
++
++## 4. Métricas medidas
++
++### 4.1 Bundle de produção (medido — `vite build`)
++
++| Item | V8 | V9 | Δ |
++|---|---:|---:|---:|
++| Entry JS (soma `index-*`) | 272.467 B | 273.821 B | +1.354 B (+0,50%) |
++| Total JS (raw) | 1.244.733 B | 1.247.497 B | +2.764 B (+0,22%) |
++| Total JS (gzip) | 395.366 B | 396.493 B | +1.127 B (+0,29%) |
++| CSS total | 28.373 B | 28.373 B | **0** |
++
++**Leitura honesta:** o bundle ficou praticamente igual (+0,22%). Parte disso é o novo cliente SSE (~2,4 kB) e o hook reescrito. Não houve regressão de layout (CSS idêntico ao byte).
++> Foi avaliado juntar `recharts`/`html5-qrcode` em chunks manuais; **a mudança foi revertida** porque o lazy-loading existente já separava essas libs e o agrupamento forçado **aumentava** o chunk de gráficos (411 kB contra 374 kB tree-shaken do V8). Decisão: não introduzir regressão por otimização cosmética.
++
++### 4.2 Testes (medido)
++
++| Suíte | Comando | Resultado |
++|---|---|---|
++| Unit (cache/single-flight, pub-sub, tokens) | `node backend/scripts/test-performance.mjs` | **11 PASS / 0 FAIL** |
++| Smoke (boot da app, rotas, guards de auth, health) | script de boot | **9 PASS / 0 FAIL** |
++| Sintaxe do backend | `node --check` (todos os arquivos) | **PASS** |
++| Build do frontend | `npm run build` | **PASS** |
++| Schema + migração | `prisma validate` + `migrate diff` | **PASS** (29/29 nomes de índice conferem) |
++
++### 4.3 Não medido (honestamente)
++
++- p50 / p95 / p99 de latência
++- Requests/s e taxa de erro sob carga (10/25/50/100/200/500 usuários)
++- Conexões ativas no PostgreSQL e uso de CPU/memória do Render
++
++**Motivo:** não há PostgreSQL no ambiente desta análise. Para medir de verdade, rodar o plano da §5 em um ambiente de teste (nunca em produção).
++
++---
++
++## 5. Plano de teste de carga (para executar em ambiente de teste)
++
++1. Subir PostgreSQL + backend em ambiente de teste (não produção) e semear dados representativos.
++2. Rodar cenários de **10, 25, 50, 100, 200 e 500** usuários simultâneos (ex.: `autocannon`/`k6`), com rampa, sobre:
++   - `GET /api/events` e `GET /api/events/:slug`
++   - `GET /api/products`
++   - `GET /api/registrations/me`
++   - `GET /api/conversations/:id/messages?since=...` (incremental)
++   - `GET /api/admin/dashboard`
++3. Medir p50/p95/p99, req/s, HTTP 429/5xx, conexões no Postgres, CPU/memória.
++4. Comparar **V8 vs V9** com a mesma base de dados e mesma máquina.
++5. Registrar aqui os números reais (substituindo os “não medido”).
++
++A configuração `PRISMA_LOG_QUERIES=true` + `PRISMA_SLOW_QUERY_MS=100` mostra as consultas lentas durante o teste, para orientar os próximos índices.
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/RELATORIO_AUDITORIA_V9.md ./RELATORIO_AUDITORIA_V9.md
+--- /tmp/v8orig/RELATORIO_AUDITORIA_V9.md	1970-01-01 00:00:00.000000000 +0000
++++ ./RELATORIO_AUDITORIA_V9.md	2026-09-15 22:39:08.330135982 +0000
+@@ -0,0 +1,153 @@
++# Relatório de Auditoria — AcadeConnect / Mustangs Atlética **V9**
++
++**Objetivo:** encontrar e corrigir a causa real da lentidão sob alto número de acessos simultâneos, **sem alterar layout, identidade visual ou funcionalidades**.
++
++**Escopo auditado:** frontend (React + Vite), backend (Node + Express), banco (PostgreSQL + Prisma), concorrência, cache, HTTP, polling, índices, processamento assíncrono.
++
++**Restrições respeitadas:**
++- Nenhuma alteração de layout/cores/fontes/menus/componentes visuais.
++- Nenhuma migração destrutiva (`DROP`/`TRUNCATE`/reset/`db push`) e **nenhuma perda de dados**.
++- Todas as migrações novas são **aditivas**.
++- Nenhuma funcionalidade existente removida.
++
++> Observação de honestidade técnica: o ambiente desta análise **não possuía PostgreSQL**, então não foi possível executar carga real contra o banco. Latência/throughput aparecem como **“não medido”** no relatório de performance. O que foi medido (build, unit tests, contagem de consultas por leitura de código, tamanho de bundle) está marcado como medido.
++
++---
++
++## 1. Diagnóstico — causa raiz do gargalo
++
++A lentidão sob concorrência **não era causada por “servidor fraco”**. A auditoria identificou seis causas combinadas:
++
++| # | Causa raiz | Evidência |
++|---|-----------|-----------|
++| A | **Polling agressivo de mensagens.** `useLiveConversation` refazia `GET /conversations/:id` a cada **5s**, recebendo a **thread inteira** a cada chamada. | `frontend/src/hooks/useLiveConversation.js` (v8) |
++| B | **Consultas repetidas e idênticas** em endpoints públicos (eventos, loja, resultados de sorteio) e no dashboard, sem cache. | `eventController.listEvents`, `productService`, `raffleService`, `adminController.dashboard` |
++| C | **N+1 / operações em lote feitas uma a uma**: notificação de todos os inscritos de um evento, todos os admins, emissão massiva de certificados. | `eventController.updateEvent`, `conversationService.sendMessage`, `certificateService.autoIssueCertificatesForEvent` |
++| D | **Falta de índices** para os filtros/ordenações mais usados (`eventId+status`, `createdAt`, `userId+read`, `conversationId+createdAt`, `status+expiresAt`…). | `schema.prisma` (v8) |
++| E | **Consultas sem paginação/limite** (listas que crescem indefinidamente). | vários `findMany()` sem `take` |
++| F | **Condições de corrida** em vagas de inscrição e geração de PIX sob concorrência. | `registrationController.registerForEvent`, `paymentService.createPayment` |
++
++Cada item foi corrigido. Detalhes abaixo.
++
++---
++
++## 2. Correções aplicadas
++
++### 2.1 Frontend — fim do polling pesado (Prioridade 1/3)
++
++| Problema | Causa | Impacto | Correção |
++|---|---|---|---|
++| Thread re-baixada a cada 5s | `useLiveConversation` chamava `GET /conversations/:id` completo | `200 usuários × 12 req/min = ~2.400 req/min`, cada uma retornando a conversa inteira | Refresh **incremental** (`GET /conversations/:id/messages?since=ISO`, só mensagens novas) + **intervalo adaptativo** (5s com atividade → até 60s sem atividade) + **pausa em aba oculta** + **refresh imediato ao voltar o foco** |
++| Latência de novas mensagens | dependia do próximo tick | até 5s de atraso | **SSE** (`EventSource`): mensagem nova aparece na hora, sem polling |
++| Polling duplicado por componente | cada componente abria o próprio timer | múltiplas chamadas simultâneas | Cliente SSE **singleton** (`frontend/src/api/realtime.js`), 1 conexão por aba |
++| Badge de não lidas | `setInterval` 60s | 1 req/min por usuário logado | Atualização via SSE + fallback lento (120s, pausado em aba oculta) + refresh no foco |
++| Reload completo em erro | `window.location.reload()` nos botões “tentar novamente” | recarregava toda a SPA | passou a usar o `reload` do próprio hook (`Home`, `AdminEventoForm`) |
++
++### 2.2 Backend — SSE (Server-Sent Events)
++
++- `backend/src/services/realtime.js`: hub pub/sub em processo (EventEmitter).
++- `backend/src/controllers/realtimeController.js` + `routes/realtime.routes.js`:
++  - `POST /api/realtime/token` → token **curto (2 min) e com escopo `purpose: stream`** (não expõe o JWT de sessão na URL);
++  - `GET /api/realtime/stream?token=...` → stream SSE com heartbeat de 25s e limpeza no `close`.
++- Notificações e mensagens publicam em tempo real (payload mínimo: id/tipo).
++- **Limitação documentada:** entrega em processo. Com 1 instância (Render) cobre todos os usuários. Em escala horizontal seria necessário um broker compartilhado (Redis pub/sub); até lá, o **polling otimizado de fallback mantém a correção** do estado.
++
++### 2.3 Backend — banco / Prisma / pool (Prioridade 2)
++
++| Problema | Correção |
++|---|---|
++| PrismaClient sem parâmetros de pool, risco de múltiplas instâncias em hot-reload | `config/prisma.js`: instância única (cache em `globalThis`), **pool explícito e configurável** (`connection_limit`, `pool_timeout`, `connect_timeout`), warmup no boot e desconexão limpa |
++| Nenhum diagnóstico de consulta lenta | log de query lenta **opt-in** (`PRISMA_LOG_QUERIES`) por limiar (`PRISMA_SLOW_QUERY_MS`) |
++| Falta de índices | **29 índices** aditivos (ver §3) |
++
++> ⚠️ Não aumentamos `connection_limit` às cegas. O padrão é **10** e há aviso explícito: medir antes de elevar; um pool grande tende a piorar o problema.
++
++### 2.4 Backend — N+1 e agregações (Prioridade 4)
++
++| Problema | Causa | Correção |
++|---|---|---|
++| Notificar todos os inscritos de um evento | um `INSERT` + round-trip por usuário | `createNotifications()` → **um `createMany`** (`notificationService.js`); usado em `eventController.updateEvent` e `conversationService.sendMessage` |
++| Notificar todos os admins de nova mensagem | idem | bulk insert com lista buscada 1 vez |
++| Relatório carregava **todas** as inscrições + presenças para somar em JS | `reportController` | agregados no **banco** (`count`, `groupBy`) |
++| Resumo de presença por evento carregava todas as presenças de todas as atividades | `attendanceController.eventAttendanceSummary` | `groupBy` + projeção de 2 colunas |
++| Emissão massiva de certificados: 1 consulta pesada por participante | `autoIssueCertificatesForEvent` | elegibilidade em lote (já existia) + carga das inscrições em **lotes de 50** com um helper que não re-consulta; email do usuário reaproveitado (elimina `user.findUnique` extra por certificado) |
++
++### 2.5 Backend — paginação / limites (Prioridade 5)
++
++Limites aplicados a listas que cresciam sem limite:
++`registrations/me`, `certificates/me`, `payments/mine`, `orders/mine`, `products` (público/admin), `raffles` + resultados públicos, `conversations` (minhas/admin), mensagens da conversa (**últimas 200**, ordem crescente), atividades por evento.
++Comentários claros no código e defaults generosos para **não alterar a experiência atual**.
++
++### 2.6 Backend — concorrência (Prioridade 6)
++
++| Fluxo | Risco | Correção |
++|---|---|---|
++| Inscrição em evento/atividade | dois usuários pegando a última vaga | checagem + INSERT em **transação `Serializable`** com **retry em conflito (P2034)** |
++| PIX (evento/pedido) | dois requests simultâneos criando dois pagamentos | reuse/regeneração + captura de **P2002** devolvendo o pagamento já criado (**idempotente**) |
++| Pedido/estoque | venda dupla | já era transacional com decremento condicional (`stock >= qty`) — **preservado** |
++| Sorteio | vencedor duplicado | transação + índice único — **preservado** |
++
++### 2.7 Backend — cache (Prioridade 7)
++
++`backend/src/utils/cache.js`: cache TTL em memória com **single-flight** (rajada de requisições idênticas dispara **1** consulta) e invalidação por prefixo.
++
++Aplicado a: lista/detalhe público de eventos, loja (produtos ativos), resultados públicos de sorteio, dashboard administrativo.
++**Nunca** é usado para dado privado por usuário (autorização continua exata).
++Invalidação explícita em toda escrita relacionada.
++
++### 2.8 Backend — HTTP / infra (Prioridade 9)
++
++- **gzip** (`compression`) para JSON/texto, **excluindo SSE** (não pode ser bufferizado).
++- **ETag fraco** + `Cache-Control` agressivo para `/uploads` (nomes são hashes imutáveis).
++- **CORS preflight cacheado** (`maxAge: 600`) — elimina metade dos requests em setup cross-origin (Vercel → Render).
++- **Keep-alive** ajustado (`keepAliveTimeout`/`headersTimeout`) para o proxy do Render.
++- **Health check** sem tocar o banco e **fora do rate limit**.
++- **Rate limit em camadas**: global (padrão elevado para 600/15min, para não bloquear NAT/campus), `authLimiter`, **`heavyLimiter`** (exports, certificados, pedidos, PIX, inscrição) e `streamLimiter` (abertura de SSE).
++- **Graceful shutdown** + handlers de `unhandledRejection`/`uncaughtException`.
++- **Cache curto do usuário autenticado** (5s, invalidado em escritas) — remove a consulta de auth repetida em **todo** request protegido.
++
++### 2.9 O que **não** foi alterado
++
++- Layout, identidade visual, cores, fontes, menus, logos, componentes e estrutura de páginas.
++- Fluxo e correções de **QR de presença**, **PIX** (EMV/CRC/chave/validade/regeneração), **sorteio**, **inscrições**, **certificados**, **pedidos**, **mensagens** (comportamento).
++- Segurança: autenticação, autorização/RBAC, ownership (anti-IDOR), validação, hash de senha.
++
++---
++
++## 3. Migração de banco (aditiva)
++
++`backend/prisma/migrations/20260916000000_add_performance_indexes/migration.sql`
++
++- **Somente `CREATE INDEX IF NOT EXISTS`** por 29 índices. Zero `DROP`/`TRUNCATE`/`DELETE`/alteração de coluna/tabela.
++- Idempotente e segura em banco populado.
++- Nomes conferidos contra o SQL gerado pelo próprio Prisma (`prisma migrate diff --from-empty --to-schema-datamodel`) — **29/29 batem**.
++
++Índices por motivo (resumo): Evento (`deletedAt+status`, `deletedAt+createdAt`, `startDate`), Inscrição (`eventId+status`, `createdAt`, `eventId+createdAt`), Atividade (`eventId+date`), InscriçãoAtividade (`activityId+status`), Presença (`eventId`, `eventId+recordedAt`), Certificado (`eventId`, `userId+issueDate`), Notificação (`userId+read`, `userId+createdAt`), Auditoria (`userId`), Pagamento (`status+expiresAt`, `createdAt`, `userId+createdAt`), Produto (`status+deletedAt`, `status+featured`), Cupom (`active+deletedAt`), Pedido (`createdAt`, `userId+createdAt`), Conversa (`lastMessageAt`, `userId+lastMessageAt`), Mensagem (`conversationId+createdAt`, `conversationId+readAt`), Sorteio (`createdAt`), Usuário (`createdAt`).
++
++---
++
++## 4. Arquivos alterados / criados
++
++**Novos (7):**
++```
++backend/src/utils/cache.js
++backend/src/services/realtime.js
++backend/src/controllers/realtimeController.js
++backend/src/routes/realtime.routes.js
++backend/scripts/test-performance.mjs
++frontend/src/api/realtime.js
++backend/prisma/migrations/20260916000000_add_performance_indexes/migration.sql
++```
++
++**Alterados (35):** backend (config, app, server, middlewares, 11 controllers, 7 services, 2 utils, 3 routes), frontend (api/services, api/realtime, hooks/useLiveConversation, layouts/DashboardLayout, components/Header, pages/Home, pages/admin/AdminEventoForm).
++Lista exata disponível no diff `CORRECOES_V9.diff`.
++
++---
++
++## 5. Riscos residuais e recomendações
++
++1. **Emissão massiva de certificados** permanece síncrona (gera PDF por participante). O custo de banco foi reduzido a lotes, mas a geração de PDF ainda é a parte pesada. Para eventos muito grandes, recomenda-se um **job em background** (fila) — fora do escopo desta correção e sem quebra do fluxo atual.
++2. **SSE em múltiplas instâncias** exigirá broker compartilhado (Redis pub/sub). Com 1 instância (Render) funciona integralmente; o fallback de polling cobre o resto.
++3. **Uploads em disco local** continuam efêmeros em Render — migrar para S3/Cloudinary (`UPLOAD_DIR`/`UPLOADS_BASE_URL` já preparados).
++4. **E-mail** desativado (`EMAIL_ENABLED=false`) — recuperação de senha/certificado só no console.
++5. `connection_limit` deve ser **medido**, não elevado por palpite.
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/.env.example ./backend/.env.example
+--- /tmp/v8orig/backend/.env.example	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/.env.example	2026-09-15 22:36:12.583971736 +0000
+@@ -25,9 +25,39 @@
+ COOKIE_NAME=acadeconnect_token
+ 
+ # Rate limiting
++# Global API limit (per IP). Health checks and OPTIONS are never counted.
+ RATE_LIMIT_WINDOW_MS=900000
+-RATE_LIMIT_MAX=300
++RATE_LIMIT_MAX=600
+ AUTH_RATE_LIMIT_MAX=20
++# Limit for expensive endpoints (exports, certificate issuance, orders, PIX).
++HEAVY_RATE_LIMIT_MAX=30
++# Limit for opening realtime (SSE) streams.
++STREAM_RATE_LIMIT_MAX=30
++
++# Database connection pool (Prisma).
++# connection_limit: max simultaneous connections THIS process opens.
++# Do NOT raise blindly — measure first. For a single Render instance a small
++# pool (10) is usually far better than a large one.
++PRISMA_CONNECTION_LIMIT=10
++PRISMA_POOL_TIMEOUT=20
++PRISMA_CONNECT_TIMEOUT=10
++# Set to true to log slow Prisma queries (never enable verbose logging in prod).
++PRISMA_LOG_QUERIES=false
++PRISMA_SLOW_QUERY_MS=100
++
++# In-memory cache TTLs (ms) for read-heavy, low-write data.
++PUBLIC_CACHE_TTL_MS=15000
++DASHBOARD_CACHE_TTL_MS=30000
++# Short TTL for the authenticated user lookup done on every request.
++AUTH_USER_CACHE_MS=5000
++
++# HTTP compression (gzip) for JSON/text responses.
++COMPRESSION_ENABLED=true
++COMPRESSION_THRESHOLD=1024
++
++# Node HTTP keep-alive (behind Render's proxy).
++KEEP_ALIVE_TIMEOUT_MS=65000
++HEADERS_TIMEOUT_MS=66000
+ 
+ # Uploads
+ UPLOAD_DIR=uploads
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/package-lock.json ./backend/package-lock.json
+--- /tmp/v8orig/backend/package-lock.json	2026-09-15 18:43:29.000000000 +0000
++++ ./backend/package-lock.json	2026-09-15 22:30:53.500042423 +0000
+@@ -7,9 +7,11 @@
+     "": {
+       "name": "acadeconnect-backend",
+       "version": "1.0.0",
++      "hasInstallScript": true,
+       "dependencies": {
+         "@prisma/client": "^5.19.1",
+         "bcryptjs": "^2.4.3",
++        "compression": "^1.7.4",
+         "cookie-parser": "^1.4.6",
+         "cors": "^2.8.5",
+         "dotenv": "^16.4.5",
+@@ -726,6 +728,50 @@
+         "node": ">= 10"
+       }
+     },
++    "node_modules/compressible": {
++      "version": "2.0.18",
++      "resolved": "https://registry.npmjs.org/compressible/-/compressible-2.0.18.tgz",
++      "integrity": "sha512-AF3r7P5dWxL8MxyITRMlORQNaOA2IkAFaTr4k7BUumjPtRpGDTZpl0Pb1XCO6JeDCBdp126Cgs9sMxqSjgYyRg==",
++      "license": "MIT",
++      "dependencies": {
++        "mime-db": ">= 1.43.0 < 2"
++      },
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/compression": {
++      "version": "1.8.2",
++      "resolved": "https://registry.npmjs.org/compression/-/compression-1.8.2.tgz",
++      "integrity": "sha512-o8vI5RE5A6EVVOd9o41jKp41aJom+QTEO/Bx8MYNjexMo/Bv2WOjUfZr+aL0WnYSgymUy6zeguqLTsIhV0gMvQ==",
++      "license": "MIT",
++      "dependencies": {
++        "bytes": "3.1.2",
++        "compressible": "~2.0.18",
++        "debug": "2.6.9",
++        "destroy": "1.2.0",
++        "negotiator": "~0.6.4",
++        "on-headers": "~1.1.0",
++        "safe-buffer": "5.2.1",
++        "vary": "~1.1.2"
++      },
++      "engines": {
++        "node": ">= 0.8.0"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/compression/node_modules/negotiator": {
++      "version": "0.6.4",
++      "resolved": "https://registry.npmjs.org/negotiator/-/negotiator-0.6.4.tgz",
++      "integrity": "sha512-myRT3DiWPHqho5PrJaIRyaMv2kgYf0mUVgBNOYMuCH5Ki1yEiQaf/ZJuQ62nvpc44wL5WDbTX7yGJi1Neevw8w==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
+     "node_modules/concat-map": {
+       "version": "0.0.1",
+       "resolved": "https://registry.npmjs.org/concat-map/-/concat-map-0.0.1.tgz",
+@@ -2596,6 +2642,15 @@
+       "engines": {
+         "node": ">= 0.8"
+       }
++    },
++    "node_modules/on-headers": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/on-headers/-/on-headers-1.1.0.tgz",
++      "integrity": "sha512-737ZY3yNnXy37FHkQxPzt4UZ2UWPWiCZWLvFZ4fu5cueciegX0zGPnrlY6bwRg4FdQOe9YU8MkmJwGhoMybl8A==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.8"
++      }
+     },
+     "node_modules/once": {
+       "version": "1.4.0",
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/package.json ./backend/package.json
+--- /tmp/v8orig/backend/package.json	2026-09-15 16:59:14.000000000 +0000
++++ ./backend/package.json	2026-09-15 22:30:46.915961342 +0000
+@@ -27,12 +27,13 @@
+   "dependencies": {
+     "@prisma/client": "^5.19.1",
+     "bcryptjs": "^2.4.3",
++    "compression": "^1.7.4",
+     "cookie-parser": "^1.4.6",
+     "cors": "^2.8.5",
+     "dotenv": "^16.4.5",
++    "exceljs": "^4.4.0",
+     "express": "^4.19.2",
+     "express-rate-limit": "^7.4.0",
+-    "exceljs": "^4.4.0",
+     "helmet": "^7.1.0",
+     "joi": "^17.13.3",
+     "jsonwebtoken": "^9.0.2",
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/prisma/migrations/20260916000000_add_performance_indexes/migration.sql ./backend/prisma/migrations/20260916000000_add_performance_indexes/migration.sql
+--- /tmp/v8orig/backend/prisma/migrations/20260916000000_add_performance_indexes/migration.sql	1970-01-01 00:00:00.000000000 +0000
++++ ./backend/prisma/migrations/20260916000000_add_performance_indexes/migration.sql	2026-09-15 22:34:34.254760876 +0000
+@@ -0,0 +1,72 @@
++-- ============================================================================
++-- AcadeConnect - Performance indexes (ADDITIVE, safe migration)
++--
++-- Purpose: high-concurrency performance. These indexes back the filters and
++-- ordering used by the hot queries (dashboard, event listings, registrations,
++-- attendance/reports, notifications, payments/orders, store, conversations).
++--
++-- Safety: INDEX ONLY. No DROP, no TRUNCATE, no column/table change, no data
++-- loss. Every statement is CREATE INDEX IF NOT EXISTS, so it is idempotent and
++-- safe to run against a populated production database.
++-- ============================================================================
++
++-- User: admin user listing ordered by creation date
++CREATE INDEX IF NOT EXISTS "User_createdAt_idx" ON "User"("createdAt");
++
++-- Event: public listing (deletedAt + status), admin ordering, upcoming filter
++CREATE INDEX IF NOT EXISTS "Event_deletedAt_status_idx" ON "Event"("deletedAt", "status");
++CREATE INDEX IF NOT EXISTS "Event_deletedAt_createdAt_idx" ON "Event"("deletedAt", "createdAt");
++CREATE INDEX IF NOT EXISTS "Event_startDate_idx" ON "Event"("startDate");
++
++-- Activity: schedule ordering per event
++CREATE INDEX IF NOT EXISTS "Activity_eventId_date_idx" ON "Activity"("eventId", "date");
++
++-- Registration: capacity counts by event+status, per-day charts, ordering
++CREATE INDEX IF NOT EXISTS "Registration_eventId_status_idx" ON "Registration"("eventId", "status");
++CREATE INDEX IF NOT EXISTS "Registration_createdAt_idx" ON "Registration"("createdAt");
++CREATE INDEX IF NOT EXISTS "Registration_eventId_createdAt_idx" ON "Registration"("eventId", "createdAt");
++
++-- ActivityRegistration: activity roster (confirmed enrollments)
++CREATE INDEX IF NOT EXISTS "ActivityRegistration_activityId_status_idx" ON "ActivityRegistration"("activityId", "status");
++
++-- Attendance: event-scoped reports and recent-presence ordering
++CREATE INDEX IF NOT EXISTS "Attendance_eventId_idx" ON "Attendance"("eventId");
++CREATE INDEX IF NOT EXISTS "Attendance_eventId_recordedAt_idx" ON "Attendance"("eventId", "recordedAt");
++
++-- Certificate: event-scoped listing and per-user history
++CREATE INDEX IF NOT EXISTS "Certificate_eventId_idx" ON "Certificate"("eventId");
++CREATE INDEX IF NOT EXISTS "Certificate_userId_issueDate_idx" ON "Certificate"("userId", "issueDate");
++
++-- Notification: unread counters and the bell dropdown
++CREATE INDEX IF NOT EXISTS "Notification_userId_read_idx" ON "Notification"("userId", "read");
++CREATE INDEX IF NOT EXISTS "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt");
++
++-- AuditLog: activity feed per user
++CREATE INDEX IF NOT EXISTS "AuditLog_userId_idx" ON "AuditLog"("userId");
++
++-- Payment: expiry sweep (PENDING + expiresAt), admin ordering
++CREATE INDEX IF NOT EXISTS "Payment_status_expiresAt_idx" ON "Payment"("status", "expiresAt");
++CREATE INDEX IF NOT EXISTS "Payment_createdAt_idx" ON "Payment"("createdAt");
++CREATE INDEX IF NOT EXISTS "Payment_userId_createdAt_idx" ON "Payment"("userId", "createdAt");
++
++-- Product: public store listing (active, not deleted) and featured highlight
++CREATE INDEX IF NOT EXISTS "Product_status_deletedAt_idx" ON "Product"("status", "deletedAt");
++CREATE INDEX IF NOT EXISTS "Product_status_featured_idx" ON "Product"("status", "featured");
++
++-- Coupon: active coupon lookup
++CREATE INDEX IF NOT EXISTS "Coupon_active_deletedAt_idx" ON "Coupon"("active", "deletedAt");
++
++-- Order: admin/user listing ordered by creation date
++CREATE INDEX IF NOT EXISTS "Order_createdAt_idx" ON "Order"("createdAt");
++CREATE INDEX IF NOT EXISTS "Order_userId_createdAt_idx" ON "Order"("userId", "createdAt");
++
++-- Conversation: inbox ordering
++CREATE INDEX IF NOT EXISTS "Conversation_lastMessageAt_idx" ON "Conversation"("lastMessageAt");
++CREATE INDEX IF NOT EXISTS "Conversation_userId_lastMessageAt_idx" ON "Conversation"("userId", "lastMessageAt");
++
++-- Message: incremental fetch (createdAt) and unread marking (readAt)
++CREATE INDEX IF NOT EXISTS "Message_conversationId_createdAt_idx" ON "Message"("conversationId", "createdAt");
++CREATE INDEX IF NOT EXISTS "Message_conversationId_readAt_idx" ON "Message"("conversationId", "readAt");
++
++-- Raffle: public results ordering
++CREATE INDEX IF NOT EXISTS "Raffle_createdAt_idx" ON "Raffle"("createdAt");
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/prisma/schema.prisma ./backend/prisma/schema.prisma
+--- /tmp/v8orig/backend/prisma/schema.prisma	2026-09-15 18:36:00.000000000 +0000
++++ ./backend/prisma/schema.prisma	2026-09-15 22:34:22.402614926 +0000
+@@ -184,6 +184,7 @@
+ 
+   @@index([email])
+   @@index([role])
++@@index([createdAt])
+ }
+ 
+ model Event {
+@@ -233,6 +234,9 @@
+ 
+   @@index([status])
+   @@index([slug])
++@@index([deletedAt, status])
++@@index([deletedAt, createdAt])
++@@index([startDate])
+ }
+ 
+ model Speaker {
+@@ -281,6 +285,7 @@
+ 
+   @@index([eventId])
+   @@index([date])
++@@index([eventId, date])
+ }
+ 
+ model Registration {
+@@ -306,6 +311,9 @@
+   @@unique([userId, eventId])
+   @@index([eventId])
+   @@index([userId])
++@@index([eventId, status])
++@@index([createdAt])
++@@index([eventId, createdAt])
+ }
+ 
+ model ActivityRegistration {
+@@ -319,6 +327,7 @@
+   activity     Activity     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+ 
+   @@unique([registrationId, activityId])
++@@index([activityId, status])
+ }
+ 
+ model Attendance {
+@@ -341,6 +350,8 @@
+   @@unique([registrationId, activityId])
+   @@index([activityId])
+   @@index([userId])
++@@index([eventId])
++@@index([eventId, recordedAt])
+ }
+ 
+ model Certificate {
+@@ -377,6 +388,8 @@
+   // Várias versões (original + correções) podem coexistir para o mesmo usuário/evento.
+   @@index([userId, eventId, activityId])
+   @@index([code])
++@@index([eventId])
++@@index([userId, issueDate])
+ }
+ 
+ model Notification {
+@@ -393,6 +406,8 @@
+ 
+   @@index([userId])
+   @@index([read])
++@@index([userId, read])
++@@index([userId, createdAt])
+ }
+ 
+ model AuditLog {
+@@ -409,6 +424,7 @@
+ 
+   @@index([action])
+   @@index([createdAt])
++@@index([userId])
+ }
+ 
+ // ============================================================
+@@ -463,6 +479,9 @@
+   @@index([userId])
+   @@index([status])
+   @@index([eventId])
++@@index([status, expiresAt])
++@@index([createdAt])
++@@index([userId, createdAt])
+ }
+ 
+ // ============================================================
+@@ -485,6 +504,8 @@
+   orderItems OrderItem[]
+ 
+   @@index([status])
++@@index([status, deletedAt])
++@@index([status, featured])
+ }
+ 
+ model Coupon {
+@@ -506,6 +527,7 @@
+ 
+   @@index([code])
+   @@index([active])
++@@index([active, deletedAt])
+ }
+ 
+ model Order {
+@@ -528,6 +550,8 @@
+ 
+   @@index([userId])
+   @@index([status])
++@@index([createdAt])
++@@index([userId, createdAt])
+ }
+ 
+ model OrderItem {
+@@ -565,6 +589,8 @@
+ 
+   @@index([userId])
+   @@index([status])
++@@index([lastMessageAt])
++@@index([userId, lastMessageAt])
+ }
+ 
+ model Message {
+@@ -580,6 +606,8 @@
+   sender       User         @relation("MessageSender", fields: [senderId], references: [id])
+ 
+   @@index([conversationId])
++@@index([conversationId, createdAt])
++@@index([conversationId, readAt])
+ }
+ 
+ // ============================================================
+@@ -602,6 +630,7 @@
+   winners   RaffleWinner[]
+ 
+   @@index([eventId])
++@@index([createdAt])
+ }
+ 
+ model RaffleWinner {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/scripts/test-performance.mjs ./backend/scripts/test-performance.mjs
+--- /tmp/v8orig/backend/scripts/test-performance.mjs	1970-01-01 00:00:00.000000000 +0000
++++ ./backend/scripts/test-performance.mjs	2026-09-15 22:36:44.072359512 +0000
+@@ -0,0 +1,142 @@
++/**
++ * Performance primitives test suite (no database required).
++ *
++ *   node scripts/test-performance.mjs
++ *
++ * Covers: TTL cache + single-flight, realtime pub/sub hub, short-lived stream
++ * token signing. These are the pieces that changed to reduce load; the DB-backed
++ * flows are exercised by the project's integration scripts against PostgreSQL.
++ */
++import assert from 'node:assert/strict';
++import { cacheGet, cacheSet, cacheWrap, invalidate, cacheStats } from '../src/utils/cache.js';
++import { subscribeUser, publishToUser, publishToUsers, listenerCount } from '../src/services/realtime.js';
++import { signToken, verifyToken } from '../src/utils/jwt.js';
++
++process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
++
++let pass = 0;
++let fail = 0;
++function test(name, fn) {
++  try {
++    fn();
++    pass += 1;
++    // eslint-disable-next-line no-console
++    console.log(`PASS  ${name}`);
++  } catch (err) {
++    fail += 1;
++    // eslint-disable-next-line no-console
++    console.error(`FAIL  ${name}: ${err.message}`);
++  }
++}
++async function testAsync(name, fn) {
++  try {
++    await fn();
++    pass += 1;
++    // eslint-disable-next-line no-console
++    console.log(`PASS  ${name}`);
++  } catch (err) {
++    fail += 1;
++    // eslint-disable-next-line no-console
++    console.error(`FAIL  ${name}: ${err.message}`);
++  }
++}
++
++// ---------------- cache ----------------
++test('cache stores and reads a value', () => {
++  cacheSet('t:a', { v: 1 }, 1000);
++  assert.deepEqual(cacheGet('t:a'), { v: 1 });
++});
++
++test('cache misses on unknown key', () => {
++  assert.equal(cacheGet('t:missing'), undefined);
++});
++
++await testAsync('cache TTL expires entries', async () => {
++  cacheSet('t:ttl', 'x', 15);
++  assert.equal(cacheGet('t:ttl'), 'x');
++  await new Promise((r) => setTimeout(r, 40));
++  assert.equal(cacheGet('t:ttl'), undefined);
++});
++
++await testAsync('cacheWrap single-flight: producer runs once for concurrent callers', async () => {
++  let calls = 0;
++  const producer = async () => {
++    calls += 1;
++    await new Promise((r) => setTimeout(r, 30));
++    return 42;
++  };
++  const [a, b, c] = await Promise.all([
++    cacheWrap('t:single', 1000, producer),
++    cacheWrap('t:single', 1000, producer),
++    cacheWrap('t:single', 1000, producer),
++  ]);
++  assert.deepEqual([a, b, c], [42, 42, 42]);
++  assert.equal(calls, 1, `producer should run once, ran ${calls}`);
++});
++
++test('invalidate(prefix) drops only matching keys', () => {
++  cacheSet('events:list:1', 'e1', 1000);
++  cacheSet('events:one:x', 'e2', 1000);
++  cacheSet('products:public', 'p', 1000);
++  invalidate('events:');
++  assert.equal(cacheGet('events:list:1'), undefined);
++  assert.equal(cacheGet('events:one:x'), undefined);
++  assert.equal(cacheGet('products:public'), 'p');
++});
++
++test('cacheStats exposes size/hits/misses', () => {
++  const s = cacheStats();
++  assert.equal(typeof s.size, 'number');
++  assert.equal(typeof s.hits, 'number');
++});
++
++// ---------------- realtime hub ----------------
++test('publishToUser reaches only that user', () => {
++  const got = [];
++  const off = subscribeUser('u1', (e) => got.push(e));
++  publishToUser('u1', { type: 'message', conversationId: 'c1' });
++  publishToUser('u2', { type: 'message', conversationId: 'c2' });
++  off();
++  assert.equal(got.length, 1);
++  assert.equal(got[0].conversationId, 'c1');
++  assert.equal(listenerCount('u1'), 0);
++});
++
++test('publishToUsers deduplicates recipients', () => {
++  const seen = [];
++  const offA = subscribeUser('a', (e) => seen.push(['a', e.type]));
++  const offB = subscribeUser('b', (e) => seen.push(['b', e.type]));
++  publishToUsers(['a', 'a', 'b'], { type: 'notification' });
++  offA(); offB();
++  assert.equal(seen.filter((x) => x[0] === 'a').length, 1);
++  assert.equal(seen.filter((x) => x[0] === 'b').length, 1);
++});
++
++test('unsubscribe stops delivery', () => {
++  let n = 0;
++  const off = subscribeUser('z', () => { n += 1; });
++  publishToUser('z', { type: 'x' });
++  off();
++  publishToUser('z', { type: 'x' });
++  assert.equal(n, 1);
++});
++
++// ---------------- jwt / stream tokens ----------------
++test('long-lived token uses default expiry and carries subject', () => {
++  const t = signToken({ sub: 'user-1' });
++  const p = verifyToken(t);
++  assert.equal(p.sub, 'user-1');
++});
++
++test('short-lived stream token carries purpose=stream and expires', () => {
++  const t = signToken({ sub: 'user-1', purpose: 'stream' }, { expiresIn: '2m' });
++  const p = verifyToken(t);
++  assert.equal(p.purpose, 'stream');
++  assert.ok(p.exp, 'token must have an exp claim');
++  const ttlSeconds = p.exp - Math.floor(Date.now() / 1000);
++  assert.ok(ttlSeconds > 0 && ttlSeconds <= 120, `ttl=${ttlSeconds}`);
++});
++
++// eslint-disable-next-line no-console
++console.log(`\n${pass} PASS / ${fail} FAIL`);
++process.exit(fail === 0 ? 0 : 1);
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/app.js ./backend/src/app.js
+--- /tmp/v8orig/backend/src/app.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/app.js	2026-09-15 22:30:32.939789239 +0000
+@@ -1,6 +1,7 @@
+ import express from 'express';
+ import cors from 'cors';
+ import helmet from 'helmet';
++import compression from 'compression';
+ import cookieParser from 'cookie-parser';
+ import path from 'node:path';
+ import { env } from './config/env.js';
+@@ -13,10 +14,29 @@
+   const app = express();
+ 
+   app.set('trust proxy', 1);
++  // Weak ETags let browsers revalidate JSON responses cheaply (304 instead of
++  // re-sending the whole payload).
++  app.set('etag', 'weak');
++  app.disable('x-powered-by');
+ 
+   // Security headers
+   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+ 
++  // gzip/deflate JSON + text responses. This cuts transfer size (and therefore
++  // perceived latency) for the list/dashboard endpoints that return the most
++  // data, with negligible CPU. SSE must NOT be compressed (it would buffer).
++  if (env.compressionEnabled) {
++    app.use(
++      compression({
++        threshold: env.compressionThreshold,
++        filter: (req, res) => {
++          if (req.headers.accept === 'text/event-stream') return false;
++          return compression.filter(req, res);
++        },
++      })
++    );
++  }
++
+   // CORS
+   app.use(
+     cors({
+@@ -25,6 +45,10 @@
+         return cb(null, false);
+       },
+       credentials: true,
++      // Let the browser cache the preflight for 10 minutes instead of issuing a
++      // new OPTIONS request for every call (halves request count on cross-origin
++      // frontend -> backend setups like Vercel -> Render).
++      maxAge: 600,
+     })
+   );
+ 
+@@ -32,15 +56,18 @@
+   app.use(express.urlencoded({ extended: true }));
+   app.use(cookieParser());
+ 
+-  // Rate limiting on the whole API
++  // Rate limiting on the whole API (health + OPTIONS skipped inside the limiter).
+   app.use('/api', apiLimiter);
+ 
+   // Serve uploaded files (avatars, banners, PDFs).
+   // Primary route is /uploads; /api/uploads is kept as an alias for
+   // compatibility with any previously generated URLs.
++  // Uploaded filenames are random hashes and never change, so they can be
++  // cached aggressively by the browser/CDN.
+   const uploadsDir = path.resolve(env.uploadDir);
+-  app.use('/uploads', express.static(uploadsDir));
+-  app.use('/api/uploads', express.static(uploadsDir));
++  const staticOpts = { maxAge: '30d', immutable: true };
++  app.use('/uploads', express.static(uploadsDir, staticOpts));
++  app.use('/api/uploads', express.static(uploadsDir, staticOpts));
+ 
+   // API routes
+   app.use('/api', routes);
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/config/env.js ./backend/src/config/env.js
+--- /tmp/v8orig/backend/src/config/env.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/config/env.js	2026-09-15 22:30:24.927690579 +0000
+@@ -31,9 +31,17 @@
+   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 5),
+ 
+   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+-  rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 300),
++  rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 600),
+   authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 20),
+ 
++  // In-memory cache TTL (ms) for read-heavy, low-write public data.
++  publicCacheTtlMs: Number(process.env.PUBLIC_CACHE_TTL_MS || 15000),
++  dashboardCacheTtlMs: Number(process.env.DASHBOARD_CACHE_TTL_MS || 30000),
++
++  // HTTP compression threshold (bytes) and toggle.
++  compressionEnabled: parseBool(process.env.COMPRESSION_ENABLED, true),
++  compressionThreshold: Number(process.env.COMPRESSION_THRESHOLD || 1024),
++
+   email: {
+     host: process.env.EMAIL_HOST,
+     port: Number(process.env.EMAIL_PORT || 587),
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/config/multer.js ./backend/src/config/multer.js
+--- /tmp/v8orig/backend/src/config/multer.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/config/multer.js	2026-09-15 22:32:03.456903900 +0000
+@@ -37,6 +37,10 @@
+ 
+ export function publicUrl(filename) {
+   if (!filename) return null;
++  // Idempotent: values already stored as absolute URLs are returned untouched.
++  // This matters for cached payloads, where enrich() runs again on values that
++  // were already enriched (otherwise the origin would be duplicated).
++  if (/^https?:\/\//i.test(filename)) return filename;
+   // apiUrl ends with "/api", but files are served statically at "/uploads".
+   // Derive the origin from API_URL (or UPLOADS_BASE_URL) and append /uploads.
+   let origin = env.uploadsBaseUrl;
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/config/prisma.js ./backend/src/config/prisma.js
+--- /tmp/v8orig/backend/src/config/prisma.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/config/prisma.js	2026-09-15 22:29:29.635009681 +0000
+@@ -1,4 +1,84 @@
+ import { PrismaClient } from '@prisma/client';
+ 
+-// Single Prisma instance reused across the app.
+-export const prisma = new PrismaClient();
++/**
++ * Single Prisma instance reused across the whole process.
++ *
++ * Why this matters for concurrency:
++ *  - Creating `new PrismaClient()` per request opens a new connection pool each
++ *    time and exhausts PostgreSQL connections under load. We keep ONE client.
++ *  - On nodemon/dev hot-reload the module can be evaluated more than once; the
++ *    client is cached on `globalThis` so reloads do not leak pools.
++ *  - The connection pool size is explicit and env-tunable. Raising it blindly is
++ *    NOT the fix for slowness (it can make it worse); see PRISMA_CONNECTION_LIMIT.
++ */
++
++const LOG_QUERIES = process.env.PRISMA_LOG_QUERIES === 'true';
++const SLOW_QUERY_MS = Number(process.env.PRISMA_SLOW_QUERY_MS || 100);
++
++/**
++ * Append safe, explicit pool parameters to DATABASE_URL when the operator has
++ * not already chosen them. Never overwrites a value the operator set.
++ *
++ *   connection_limit -> max connections this process opens
++ *   pool_timeout     -> seconds to wait for a free connection before failing
++ *   connect_timeout  -> seconds to wait for a TCP/DB handshake
++ */
++function withPoolParams(rawUrl) {
++  if (!rawUrl) return rawUrl;
++  const defaults = {
++    connection_limit: process.env.PRISMA_CONNECTION_LIMIT || '10',
++    pool_timeout: process.env.PRISMA_POOL_TIMEOUT || '20',
++    connect_timeout: process.env.PRISMA_CONNECT_TIMEOUT || '10',
++  };
++  try {
++    const href = /^postgres(ql)?:\/\//.test(rawUrl) ? rawUrl : rawUrl;
++    const u = new URL(href);
++    for (const [key, value] of Object.entries(defaults)) {
++      if (value && !u.searchParams.has(key)) u.searchParams.set(key, value);
++    }
++    return u.toString();
++  } catch {
++    // If the URL cannot be parsed, keep it untouched rather than break startup.
++    return rawUrl;
++  }
++}
++
++function createClient() {
++  const log = LOG_QUERIES ? ['query', 'warn', 'error'] : ['warn', 'error'];
++  const client = new PrismaClient({
++    ...(process.env.DATABASE_URL ? { datasourceUrl: withPoolParams(process.env.DATABASE_URL) } : {}),
++    log,
++  });
++
++  if (LOG_QUERIES) {
++    client.$on('query', (e) => {
++      if (e.duration >= SLOW_QUERY_MS) {
++        // eslint-disable-next-line no-console
++        console.warn(`[prisma:slow] ${e.duration}ms ${e.query}`);
++      }
++    });
++  }
++
++  return client;
++}
++
++export const prisma = globalThis.__acadePrisma || createClient();
++
++if (process.env.NODE_ENV !== 'production') {
++  globalThis.__acadePrisma = prisma;
++}
++
++/**
++ * Warm the pool once at boot so the first real request does not pay the
++ * connection handshake (cold start on Render).
++ */
++export async function warmupPrisma() {
++  await prisma.$queryRaw`SELECT 1`;
++}
++
++/**
++ * Close the pool cleanly on shutdown.
++ */
++export async function disconnectPrisma() {
++  await prisma.$disconnect().catch(() => {});
++}
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/controllers/activityController.js ./backend/src/controllers/activityController.js
+--- /tmp/v8orig/backend/src/controllers/activityController.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/controllers/activityController.js	2026-09-15 22:36:07.499909129 +0000
+@@ -25,7 +25,13 @@
+   if (eventId) where.eventId = eventId;
+   if (id) where.eventId = id;
+ 
+-  const activities = await prisma.activity.findMany({ where, include, orderBy: [{ date: 'asc' }, { startTime: 'asc' }] });
++  const activities = await prisma.activity.findMany({
++    where,
++    include,
++    orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
++    // Bounded: an event cannot return an unbounded activity list.
++    take: Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000),
++  });
+   return apiResponse(res, { message: 'Atividades.', data: { activities: activities.map(enrich) } });
+ });
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/controllers/adminController.js ./backend/src/controllers/adminController.js
+--- /tmp/v8orig/backend/src/controllers/adminController.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/controllers/adminController.js	2026-09-15 22:32:30.197233179 +0000
+@@ -5,11 +5,23 @@
+ import { asyncHandler } from '../utils/asyncHandler.js';
+ import { publicUrl } from '../config/multer.js';
+ import { createAuditLog } from '../services/auditLogService.js';
++import { invalidateUserCache } from '../middlewares/auth.js';
++import { cacheWrap, invalidate } from '../utils/cache.js';
++import { env } from '../config/env.js';
++
++const DASHBOARD_CACHE_KEY = 'admin:dashboard';
+ 
+ /**
+  * Dashboard with REAL data from the database (no fake numbers).
++ * Cached briefly: this endpoint runs several aggregates and is opened on every
++ * admin page load; concurrent admins would otherwise repeat identical queries.
+  */
+ export const dashboard = asyncHandler(async (req, res) => {
++  const data = await cacheWrap(DASHBOARD_CACHE_KEY, env.dashboardCacheTtlMs, buildDashboard);
++  return apiResponse(res, { message: 'Dashboard.', data });
++});
++
++async function buildDashboard() {
+   const [
+     events,
+     participants,
+@@ -72,34 +84,31 @@
+     include: { user: { select: { name: true } } },
+   });
+ 
+-  return apiResponse(res, {
+-    message: 'Dashboard.',
+-    data: {
+-      stats: {
+-        activeEvents,
+-        totalEvents: events,
+-        participants,
+-        registrations,
+-        attendance,
+-        certificates,
+-        activities,
+-      },
+-      charts: {
+-        registrationsPerDay: Object.entries(byDay).map(([date, count]) => ({ date, count })),
+-        attendanceByEvent: attendanceByEvent.map((x) => ({ name: nameMap[x.eventId] || 'Evento', count: x._count._all })),
+-        participantsPerActivity: participantsPerActivity.map((x) => ({ name: activityNameMap[x.activityId] || 'Atividade', count: x._count._all })).sort((a, b) => b.count - a.count).slice(0, 10),
+-        certificatesByStatus: certByStatus.map((x) => ({ status: x.status, count: x._count._all })),
+-      },
+-      recentActivity: recentActivity.map((a) => ({
+-        id: a.id,
+-        action: a.action,
+-        user: a.user?.name || 'Sistema',
+-        resource: a.resource,
+-        createdAt: a.createdAt,
+-      })),
++  return {
++    stats: {
++      activeEvents,
++      totalEvents: events,
++      participants,
++      registrations,
++      attendance,
++      certificates,
++      activities,
+     },
+-  });
+-});
++    charts: {
++      registrationsPerDay: Object.entries(byDay).map(([date, count]) => ({ date, count })),
++      attendanceByEvent: attendanceByEvent.map((x) => ({ name: nameMap[x.eventId] || 'Evento', count: x._count._all })),
++      participantsPerActivity: participantsPerActivity.map((x) => ({ name: activityNameMap[x.activityId] || 'Atividade', count: x._count._all })).sort((a, b) => b.count - a.count).slice(0, 10),
++      certificatesByStatus: certByStatus.map((x) => ({ status: x.status, count: x._count._all })),
++    },
++    recentActivity: recentActivity.map((a) => ({
++      id: a.id,
++      action: a.action,
++      user: a.user?.name || 'Sistema',
++      resource: a.resource,
++      createdAt: a.createdAt,
++    })),
++  };
++}
+ 
+ // ---------- User management (ADMIN) ----------
+ 
+@@ -144,6 +153,7 @@
+     },
+     select: { id: true, name: true, email: true, role: true },
+   });
++  invalidate(DASHBOARD_CACHE_KEY);
+   await createAuditLog({ userId: req.user.id, action: 'USER_CREATED', resource: 'User', resourceId: user.id, ip: req.ip });
+   return apiResponse(res, { status: 201, message: 'Usuário criado.', data: { user } });
+ });
+@@ -158,6 +168,7 @@
+     data,
+     select: { id: true, name: true, email: true, role: true, course: true },
+   });
++  invalidateUserCache(id);
+   await createAuditLog({ userId: req.user.id, action: 'USER_UPDATED', resource: 'User', resourceId: id, details: { role }, ip: req.ip });
+   return apiResponse(res, { message: 'Usuário atualizado.', data: { user } });
+ });
+@@ -169,6 +180,7 @@
+     where: { id },
+     data: { deletedAt: new Date(), email: `deleted-${id.slice(-8)}@removido.local`, name: 'Usuário removido' },
+   });
++  invalidateUserCache(id);
+   await createAuditLog({ userId: req.user.id, action: 'USER_DELETED', resource: 'User', resourceId: id, ip: req.ip });
+   return apiResponse(res, { message: 'Usuário desativado.' });
+ });
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/controllers/attendanceController.js ./backend/src/controllers/attendanceController.js
+--- /tmp/v8orig/backend/src/controllers/attendanceController.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/controllers/attendanceController.js	2026-09-15 22:36:03.495859823 +0000
+@@ -163,27 +163,42 @@
+  */
+ export const eventAttendanceSummary = asyncHandler(async (req, res) => {
+   const { eventId } = req.params;
+-  const activities = await prisma.activity.findMany({
+-    where: { eventId },
+-    include: {
+-      _count: { select: { attendance: true } },
+-      registrations: { where: { status: 'CONFIRMED' } },
+-      attendance: true,
+-    },
+-    orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+-  });
++
++  // Aggregate in the DATABASE instead of loading every attendance row of every
++  // activity into memory (which grows linearly with event size).
++  const [activities, enrolledByActivity, presentRows] = await Promise.all([
++    prisma.activity.findMany({
++      where: { eventId },
++      select: { id: true, name: true, type: true, date: true, startTime: true, endTime: true },
++      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
++    }),
++    prisma.activityRegistration.groupBy({
++      by: ['activityId'],
++      where: { activity: { eventId }, status: 'CONFIRMED' },
++      _count: { _all: true },
++    }),
++    // Only the two columns needed to build the distinct registration sets.
++    prisma.attendance.findMany({
++      where: { eventId, status: 'PRESENT' },
++      select: { activityId: true, registrationId: true },
++    }),
++  ]);
++
++  const enrolledMap = new Map(enrolledByActivity.map((x) => [x.activityId, x._count._all]));
++  const presentRegsByActivity = new Map();
++  for (const row of presentRows) {
++    if (!presentRegsByActivity.has(row.activityId)) presentRegsByActivity.set(row.activityId, new Set());
++    presentRegsByActivity.get(row.activityId).add(row.registrationId);
++  }
+ 
+   const summary = activities.map((a) => {
+-    const presentes = a.attendance.filter((x) => x.status === 'PRESENT').length;
++    const presentSet = presentRegsByActivity.get(a.id) || new Set();
++    const presentes = presentSet.size;
+     // The denominator is the union of enrolled participants and recorded
+     // attendees, so an attendance without a prior enrollment never pushes the
+     // percentage above 100%.
+-    const enrolledCount = a.registrations.length;
+-    const presentRegistrationIds = new Set(a.attendance.filter((x) => x.status === 'PRESENT').map((x) => x.registrationId));
+-    const inscritos = new Set([
+-      ...a.registrations.map((r) => r.registrationId),
+-      ...presentRegistrationIds,
+-    ]).size || enrolledCount;
++    const enrolledCount = enrolledMap.get(a.id) || 0;
++    const inscritos = Math.max(enrolledCount, presentSet.size);
+     const ausentes = Math.max(0, inscritos - presentes);
+     const percentual = inscritos === 0 ? 0 : Math.min(100, Math.round((presentes / inscritos) * 100));
+     return {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/controllers/certificateController.js ./backend/src/controllers/certificateController.js
+--- /tmp/v8orig/backend/src/controllers/certificateController.js	2026-09-15 18:37:49.000000000 +0000
++++ ./backend/src/controllers/certificateController.js	2026-09-15 22:33:32.369998804 +0000
+@@ -16,10 +16,12 @@
+ };
+ 
+ export const getMyCertificates = asyncHandler(async (req, res) => {
++  const take = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+   const certificates = await prisma.certificate.findMany({
+     where: { userId: req.user.id },
+     include: certInclude,
+     orderBy: { issueDate: 'desc' },
++    take,
+   });
+   return apiResponse(res, {
+     message: 'Meus certificados.',
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/controllers/conversationController.js ./backend/src/controllers/conversationController.js
+--- /tmp/v8orig/backend/src/controllers/conversationController.js	2026-09-15 17:41:06.000000000 +0000
++++ ./backend/src/controllers/conversationController.js	2026-09-15 22:31:22.948405060 +0000
+@@ -13,12 +13,12 @@
+ });
+ 
+ export const mine = asyncHandler(async (req, res) => {
+-  const conversations = await svc.listMyConversations(req.user.id);
++  const conversations = await svc.listMyConversations(req.user.id, req.query);
+   return apiResponse(res, { message: 'Minhas conversas.', data: { conversations } });
+ });
+ 
+ export const adminList = asyncHandler(async (req, res) => {
+-  const conversations = await svc.listAllConversations({ status: req.query.status, search: req.query.search });
++  const conversations = await svc.listAllConversations({ status: req.query.status, search: req.query.search, page: req.query.page, limit: req.query.limit });
+   return apiResponse(res, { message: 'Conversas.', data: { conversations } });
+ });
+ 
+@@ -27,6 +27,15 @@
+   return apiResponse(res, { message: 'Conversa.', data: { conversation } });
+ });
+ 
++/**
++ * Incremental messages endpoint. The live-conversation hook calls this with
++ * `?since=<lastMessageCreatedAt>` so only new messages are transferred.
++ */
++export const messagesSince = asyncHandler(async (req, res) => {
++  const result = await svc.getMessagesSince(req.params.id, req.user, req.query.since);
++  return apiResponse(res, { message: 'Mensagens.', data: result });
++});
++
+ export const start = asyncHandler(async (req, res) => {
+   const conversation = await svc.startConversation(req.user.id, req.body);
+   return apiResponse(res, { status: 201, message: 'Conversa iniciada.', data: { conversation } });
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/controllers/eventController.js ./backend/src/controllers/eventController.js
+--- /tmp/v8orig/backend/src/controllers/eventController.js	2026-09-15 17:27:16.000000000 +0000
++++ ./backend/src/controllers/eventController.js	2026-09-15 22:32:18.977095014 +0000
+@@ -7,8 +7,15 @@
+ import { slugify, generateRegistrationCode } from '../utils/codes.js';
+ import { parseDate } from '../utils/date.js';
+ import { createAuditLog } from '../services/auditLogService.js';
+-import { createNotification } from '../services/notificationService.js';
++import { createNotifications } from '../services/notificationService.js';
+ import { autoIssueCertificatesForEvent } from '../services/certificateService.js';
++import { cacheWrap, invalidate } from '../utils/cache.js';
++import { env } from '../config/env.js';
++
++// Public event listings/details are read constantly and change rarely: a short
++// TTL cache removes the repeated identical queries that dominate concurrent
++// traffic. Invalidated explicitly on every write.
++const EVENTS_CACHE_PREFIX = 'events:';
+ 
+ const eventInclude = (includeStats = false) => ({
+   institution: { select: { id: true, name: true } },
+@@ -107,57 +114,74 @@
+         ? { registrations: { _count: 'desc' } }
+         : { createdAt: 'desc' };
+ 
+-  const [total, events] = await Promise.all([
+-    prisma.event.count({ where }),
+-    prisma.event.findMany({
+-      where,
+-      orderBy,
+-      skip: (Number(page) - 1) * Number(limit),
+-      take: Number(limit),
+-      include: eventInclude(),
+-    }),
+-  ]);
++  // Search results are not cached (high cardinality); unfiltered listing is.
++  const runQuery = async () => {
++    const [total, events] = await Promise.all([
++      prisma.event.count({ where }),
++      prisma.event.findMany({
++        where,
++        orderBy,
++        skip: (Number(page) - 1) * Number(limit),
++        take: Number(limit),
++        include: eventInclude(),
++      }),
++    ]);
++    return {
++      events: events.map(enrichEvent),
++      meta: {
++        page: Number(page),
++        limit: Number(limit),
++        total,
++        pages: Math.ceil(total / Number(limit)),
++      },
++    };
++  };
++
++  const payload = search
++    ? await runQuery()
++    : await cacheWrap(
++        `${EVENTS_CACHE_PREFIX}list:${page}:${limit}:${category || ''}:${modality || ''}:${status || ''}:${location || ''}:${date || ''}:${sort}`,
++        env.publicCacheTtlMs,
++        runQuery
++      );
+ 
+   return apiResponse(res, {
+     message: 'Eventos listados.',
+-    data: { events: events.map(enrichEvent) },
+-    meta: {
+-      page: Number(page),
+-      limit: Number(limit),
+-      total,
+-      pages: Math.ceil(total / Number(limit)),
+-    },
++    data: { events: payload.events },
++    meta: payload.meta,
+   });
+ });
+ 
+ export const getEvent = asyncHandler(async (req, res) => {
+   const { idOrSlug } = req.params;
+-  const event = await prisma.event.findFirst({
+-    where: {
+-      OR: [{ id: idOrSlug }, { slug: idOrSlug }],
+-      deletedAt: null,
+-    },
+-    include: {
+-      institution: true,
+-      organizer: { select: { id: true, name: true } },
+-      activities: {
+-        orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+-        include: { speaker: true, _count: { select: { registrations: true, attendance: true } } },
++  const build = async () => {
++    const event = await prisma.event.findFirst({
++      where: {
++        OR: [{ id: idOrSlug }, { slug: idOrSlug }],
++        deletedAt: null,
+       },
+-      _count: { select: { activities: true, registrations: true, attendance: true } },
+-    },
+-  });
+-  if (!event) throw new ApiError(404, 'Evento não encontrado.');
++      include: {
++        institution: true,
++        organizer: { select: { id: true, name: true } },
++        activities: {
++          orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
++          include: { speaker: true, _count: { select: { registrations: true, attendance: true } } },
++        },
++        _count: { select: { activities: true, registrations: true, attendance: true } },
++      },
++    });
++    if (!event) throw new ApiError(404, 'Evento não encontrado.');
+ 
+-  const totalRegistered = event._count.registrations;
+-  return apiResponse(res, {
+-    message: 'Evento.',
+-    data: {
++    const totalRegistered = event._count.registrations;
++    return {
+       ...enrichEvent(event),
+       _count: { ...event._count },
+       capacityProgress: event.capacity ? Math.min(100, Math.round((totalRegistered / event.capacity) * 100)) : null,
+-    },
+-  });
++    };
++  };
++
++  const data = await cacheWrap(`${EVENTS_CACHE_PREFIX}one:${idOrSlug}`, env.publicCacheTtlMs, build);
++  return apiResponse(res, { message: 'Evento.', data });
+ });
+ 
+ // ---------- Admin / Organizer operations ----------
+@@ -220,6 +244,7 @@
+     include: eventInclude(),
+   });
+ 
++  invalidate(EVENTS_CACHE_PREFIX);
+   await createAuditLog({ userId: req.user.id, action: 'EVENT_CREATED', resource: 'Event', resourceId: event.id, ip: req.ip });
+   return apiResponse(res, { status: 201, message: 'Evento criado com sucesso.', data: { event: enrichEvent(event) } });
+ });
+@@ -336,19 +361,19 @@
+       where: { eventId: id, status: 'CONFIRMED' },
+       select: { userId: true },
+     });
+-    await Promise.all(
+-      registrations.map((r) =>
+-        createNotification({
+-          userId: r.userId,
+-          type: 'EVENT',
+-          title: 'Evento atualizado',
+-          message: `O evento "${event.name}" foi atualizado: ${changes.join('; ')}.`,
+-          link: `/eventos/${event.slug || event.id}`,
+-        })
+-      )
++    // One bulk INSERT for all recipients (was N individual inserts).
++    await createNotifications(
++      registrations.map((r) => r.userId),
++      {
++        type: 'EVENT',
++        title: 'Evento atualizado',
++        message: `O evento "${event.name}" foi atualizado: ${changes.join('; ')}.`,
++        link: `/eventos/${event.slug || event.id}`,
++      }
+     );
+   }
+ 
++  invalidate(EVENTS_CACHE_PREFIX);
+   await createAuditLog({ userId: req.user.id, action: 'EVENT_UPDATED', resource: 'Event', resourceId: id, ip: req.ip });
+   return apiResponse(res, { message: 'Evento atualizado com sucesso.', data: { event: enrichEvent(event) } });
+ });
+@@ -360,6 +385,7 @@
+     where: { id },
+     data: { status: 'CANCELLED', deletedAt: new Date() },
+   });
++  invalidate(EVENTS_CACHE_PREFIX);
+   await createAuditLog({ userId: req.user.id, action: 'EVENT_DELETED', resource: 'Event', resourceId: id, ip: req.ip });
+   return apiResponse(res, { message: 'Evento desativado.', data: { id: event.id } });
+ });
+@@ -367,6 +393,7 @@
+ export const hardDeleteEvent = asyncHandler(async (req, res) => {
+   const { id } = req.params;
+   await prisma.event.delete({ where: { id } });
++  invalidate(EVENTS_CACHE_PREFIX);
+   await createAuditLog({ userId: req.user.id, action: 'EVENT_HARD_DELETED', resource: 'Event', resourceId: id, ip: req.ip });
+   return apiResponse(res, { message: 'Evento excluído permanentemente.' });
+ });
+@@ -436,6 +463,7 @@
+     },
+   });
+ 
++  invalidate(EVENTS_CACHE_PREFIX);
+   await createAuditLog({ userId: req.user.id, action: 'EVENT_DUPLICATED', resource: 'Event', resourceId: copy.id, ip: req.ip });
+   return apiResponse(res, { status: 201, message: 'Evento duplicado com sucesso.', data: { event: copy } });
+ });
+@@ -444,6 +472,7 @@
+   const { id } = req.params;
+   const event = await prisma.event.update({ where: { id }, data: { status: 'CLOSED', allowRegistration: false } });
+   const result = await autoIssueCertificatesForEvent(id);
++  invalidate(EVENTS_CACHE_PREFIX);
+   await createAuditLog({ userId: req.user.id, action: 'EVENT_CLOSED', resource: 'Event', resourceId: id, details: result, ip: req.ip });
+   return apiResponse(res, { message: 'Evento encerrado.', data: { event, certificatesIssued: result.issued } });
+ });
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/controllers/realtimeController.js ./backend/src/controllers/realtimeController.js
+--- /tmp/v8orig/backend/src/controllers/realtimeController.js	1970-01-01 00:00:00.000000000 +0000
++++ ./backend/src/controllers/realtimeController.js	2026-09-15 22:29:57.583353848 +0000
+@@ -0,0 +1,57 @@
++import { signToken } from '../utils/jwt.js';
++import { subscribeUser } from '../services/realtime.js';
++import { apiResponse } from '../utils/apiResponse.js';
++import { asyncHandler } from '../utils/asyncHandler.js';
++
++/**
++ * Issue a SHORT-LIVED token used only to open the SSE stream.
++ *
++ * EventSource cannot send an Authorization header, so the token must travel in
++ * the query string. Using a dedicated purpose-scoped token (2 minutes, only
++ * valid for the stream) avoids putting the 7-day session JWT in URLs/logs.
++ */
++export const streamToken = asyncHandler(async (req, res) => {
++  const token = signToken({ sub: req.user.id, purpose: 'stream' }, { expiresIn: '2m' });
++  return apiResponse(res, { message: 'Token de stream.', data: { token } });
++});
++
++/**
++ * Server-Sent Events stream. One long-lived connection per open tab; the server
++ * pushes only new events (notifications / messages) instead of the client
++ * polling every few seconds.
++ */
++export const stream = asyncHandler(async (req, res) => {
++  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
++  res.setHeader('Cache-Control', 'no-cache, no-transform');
++  res.setHeader('Connection', 'keep-alive');
++  // Disable proxy buffering (nginx/Render) so events flush immediately.
++  res.setHeader('X-Accel-Buffering', 'no');
++  res.flushHeaders?.();
++
++  const write = (event) => {
++    try {
++      res.write(`data: ${JSON.stringify(event)}\n\n`);
++    } catch {
++      /* connection already gone */
++    }
++  };
++
++  write({ type: 'connected', at: Date.now() });
++
++  const unsubscribe = subscribeUser(req.user.id, write);
++
++  // Heartbeat keeps intermediary proxies from closing an idle connection.
++  const ping = setInterval(() => {
++    try {
++      res.write(': ping\n\n');
++    } catch {
++      /* ignore */
++    }
++  }, 25_000);
++  if (ping.unref) ping.unref();
++
++  req.on('close', () => {
++    clearInterval(ping);
++    unsubscribe();
++  });
++});
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/controllers/registrationController.js ./backend/src/controllers/registrationController.js
+--- /tmp/v8orig/backend/src/controllers/registrationController.js	2026-09-15 18:37:37.000000000 +0000
++++ ./backend/src/controllers/registrationController.js	2026-09-15 22:33:04.353653807 +0000
+@@ -9,6 +9,29 @@
+ import { createNotification } from '../services/notificationService.js';
+ import { sendEmail, emailTemplates } from '../services/emailService.js';
+ import { createPayment } from '../services/paymentService.js';
++import { invalidate } from '../utils/cache.js';
++
++// Public event detail/list include registration counts; a new/cancelled
++// registration can change them, so drop the cached copies.
++const EVENTS_CACHE_PREFIX = 'events:';
++
++/**
++ * Retry a serializable transaction when Postgres reports a serialization
++ * failure (P2034). This is the mechanism that prevents two participants from
++ * taking the last seat at the same instant.
++ */
++async function withSerializableRetry(fn, attempts = 3) {
++  let lastErr;
++  for (let i = 0; i < attempts; i += 1) {
++    try {
++      return await prisma.$transaction(fn, { isolationLevel: 'Serializable' });
++    } catch (err) {
++      lastErr = err;
++      if (err?.code !== 'P2034') throw err;
++    }
++  }
++  throw lastErr;
++}
+ 
+ const registrationInclude = {
+   // O dono da inscrição (para a tela de detalhe não depender do usuário logado).
+@@ -52,31 +75,13 @@
+     throw new ApiError(409, 'O prazo de inscrição já se encerrou.');
+   }
+ 
+-  // Rule: no duplicate registration.
+-  const existing = await prisma.registration.findUnique({
+-    where: { userId_eventId: { userId, eventId } },
+-  });
+-  if (existing) throw new ApiError(409, 'Você já está inscrito neste evento.');
+-
+-  // Rule: capacity.
+-  if (event.capacity) {
+-    const count = await prisma.registration.count({
+-      where: { eventId, status: { in: ['PENDING', 'CONFIRMED'] } },
+-    });
+-    if (count >= event.capacity) throw new ApiError(409, 'As vagas deste evento estão esgotadas.');
+-  }
+-
+-  // Validate selected activities belong to event & have capacity.
++  // Static activity rules (no concurrency implications).
+   const validActivities = event.activities.filter((a) => activityIds.includes(a.id));
+   if (event.requireActivityRegistration && validActivities.length === 0) {
+     throw new ApiError(409, 'Selecione ao menos uma atividade para se inscrever neste evento.');
+   }
+   for (const a of validActivities) {
+     if (!a.allowsRegistration) throw new ApiError(409, `A atividade "${a.name}" não aceita inscrição.`);
+-    if (a.capacity) {
+-      const count = await prisma.activityRegistration.count({ where: { activityId: a.id, status: 'CONFIRMED' } });
+-      if (count >= a.capacity) throw new ApiError(409, `A atividade "${a.name}" está lotada.`);
+-    }
+   }
+ 
+   // Generate unique registration code.
+@@ -89,20 +94,49 @@
+   }
+   const qrToken = generateQrToken();
+ 
+-  const registration = await prisma.registration.create({
+-    data: {
+-      code,
+-      qrToken,
+-      userId,
+-      eventId,
+-      status: 'CONFIRMED',
+-      activityRegistrations: {
+-        create: validActivities.map((a) => ({ activityId: a.id, status: 'CONFIRMED' })),
++  // Duplicate + capacity checks and the INSERT run in ONE serializable
++  // transaction, so two users racing for the last seat cannot both succeed.
++  const registration = await withSerializableRetry(async (tx) => {
++    // Rule: no duplicate registration.
++    const existing = await tx.registration.findUnique({
++      where: { userId_eventId: { userId, eventId } },
++    });
++    if (existing) throw new ApiError(409, 'Você já está inscrito neste evento.');
++
++    // Rule: event capacity (re-read inside the transaction).
++    if (event.capacity) {
++      const count = await tx.registration.count({
++        where: { eventId, status: { in: ['PENDING', 'CONFIRMED'] } },
++      });
++      if (count >= event.capacity) throw new ApiError(409, 'As vagas deste evento estão esgotadas.');
++    }
++
++    // Rule: activity capacity (re-read inside the transaction).
++    for (const a of validActivities) {
++      if (a.capacity) {
++        // eslint-disable-next-line no-await-in-loop
++        const count = await tx.activityRegistration.count({ where: { activityId: a.id, status: 'CONFIRMED' } });
++        if (count >= a.capacity) throw new ApiError(409, `A atividade "${a.name}" está lotada.`);
++      }
++    }
++
++    return tx.registration.create({
++      data: {
++        code,
++        qrToken,
++        userId,
++        eventId,
++        status: 'CONFIRMED',
++        activityRegistrations: {
++          create: validActivities.map((a) => ({ activityId: a.id, status: 'CONFIRMED' })),
++        },
+       },
+-    },
+-    include: registrationInclude,
++      include: registrationInclude,
++    });
+   });
+ 
++  invalidate(EVENTS_CACHE_PREFIX);
++
+   await createNotification({
+     userId,
+     type: 'REGISTRATION',
+@@ -172,10 +206,12 @@
+ });
+ 
+ export const getMyRegistrations = asyncHandler(async (req, res) => {
++  const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 200);
+   const registrations = await prisma.registration.findMany({
+     where: { userId: req.user.id },
+     include: registrationInclude,
+     orderBy: { createdAt: 'desc' },
++    take,
+   });
+   return apiResponse(res, { message: 'Minhas inscrições.', data: { registrations } });
+ });
+@@ -221,6 +257,7 @@
+     title: 'Inscrição cancelada',
+     message: `Sua inscrição no evento "${registration.event.name}" foi cancelada.`,
+   });
++  invalidate(EVENTS_CACHE_PREFIX);
+   await createAuditLog({ userId: req.user.id, action: 'REGISTRATION_CANCELLED', resource: 'Registration', resourceId: registration.id, ip: req.ip });
+   return apiResponse(res, { message: 'Inscrição cancelada.', data: { registration: updated } });
+ });
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/controllers/reportController.js ./backend/src/controllers/reportController.js
+--- /tmp/v8orig/backend/src/controllers/reportController.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/controllers/reportController.js	2026-09-15 22:32:47.997452382 +0000
+@@ -31,7 +31,7 @@
+     ...(Object.keys(period).length ? { createdAt: period } : {}),
+   };
+ 
+-  const [totalInscritos, presentRegs, totalCertificados, registrations] = await Promise.all([
++  const [totalInscritos, presentRegs, totalCertificados, totalAtividadesParticipadas, regsByEvent] = await Promise.all([
+     prisma.registration.count({ where: regWhere }),
+     // Distinct participants with at least one presence in the filtered scope.
+     prisma.attendance.findMany({
+@@ -43,7 +43,11 @@
+     // registration status filter must not be forwarded here (it caused a Prisma
+     // validation error when filtering by CONFIRMED/CANCELLED).
+     prisma.certificate.count({ where: { ...(eventId ? { eventId } : {}) } }),
+-    prisma.registration.findMany({ where: regWhere, include: { _count: { select: { attendance: true } }, event: { select: { name: true } } } }),
++    // Aggregate in the DATABASE. The previous implementation loaded every
++    // matching registration + its attendance rows just to sum them in JS, which
++    // is exactly the kind of unbounded work that collapses under traffic.
++    prisma.attendance.count({ where: { registration: regWhere } }),
++    prisma.registration.groupBy({ by: ['eventId'], where: regWhere, _count: { _all: true } }),
+   ]);
+ 
+   const totalPresentes = presentRegs.length;
+@@ -66,7 +70,13 @@
+     : [];
+   const actMap = Object.fromEntries(activities.map((a) => [a.id, a.name]));
+ 
+-  const totalAtividadesParticipadas = registrations.reduce((acc, r) => acc + r._count.attendance, 0);
++  // Names for the per-event breakdown (only the events that actually appear).
++  const eventIds = regsByEvent.map((r) => r.eventId);
++  const eventRows = eventIds.length
++    ? await prisma.event.findMany({ where: { id: { in: eventIds } }, select: { id: true, name: true } })
++    : [];
++  const eventNameMap = Object.fromEntries(eventRows.map((e) => [e.id, e.name]));
++
+   const percentualPresenca = totalInscritos === 0 ? 0 : Math.min(100, Math.round((totalPresentes / totalInscritos) * 100));
+ 
+   return apiResponse(res, {
+@@ -84,9 +94,9 @@
+         activity: actMap[x.activityId] || 'Atividade',
+         count: x._count._all,
+       })),
+-      porEvento: registrations.reduce((acc, r) => {
+-        const name = r.event?.name || 'Evento';
+-        acc[name] = (acc[name] || 0) + 1;
++      porEvento: regsByEvent.reduce((acc, r) => {
++        const name = eventNameMap[r.eventId] || 'Evento';
++        acc[name] = (acc[name] || 0) + r._count._all;
+         return acc;
+       }, {}),
+     },
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/middlewares/auth.js ./backend/src/middlewares/auth.js
+--- /tmp/v8orig/backend/src/middlewares/auth.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/middlewares/auth.js	2026-09-15 22:30:09.683502855 +0000
+@@ -3,6 +3,36 @@
+ import { verifyToken } from '../utils/jwt.js';
+ import { ApiError } from '../utils/apiError.js';
+ import { asyncHandler } from '../utils/asyncHandler.js';
++import { cacheWrap, invalidate } from '../utils/cache.js';
++
++const USER_SELECT = {
++  id: true,
++  name: true,
++  email: true,
++  role: true,
++  avatarUrl: true,
++  institutionId: true,
++  deletedAt: true,
++};
++
++// The authenticated user is looked up on EVERY protected request. That is one
++// indexed query per request; under concurrency it doubles the DB load for no
++// benefit when nothing changed. A very short TTL removes the repeats while
++// keeping authorization effectively live (explicitly invalidated on writes).
++const USER_CACHE_TTL_MS = Number(process.env.AUTH_USER_CACHE_MS || 5000);
++
++async function loadUser(id) {
++  return prisma.user.findUnique({ where: { id }, select: USER_SELECT });
++}
++
++/** Invalidate the cached authenticated user (call after role/profile changes). */
++export function invalidateUserCache(userId) {
++  invalidate(`auth:user:${userId}`);
++}
++
++async function getCachedUser(id) {
++  return cacheWrap(`auth:user:${id}`, USER_CACHE_TTL_MS, () => loadUser(id));
++}
+ 
+ /**
+  * Extracts the bearer token from Authorization header or HttpOnly cookie.
+@@ -34,18 +64,7 @@
+     throw new ApiError(401, 'Sessão inválida ou expirada. Faça login novamente.');
+   }
+ 
+-  const user = await prisma.user.findUnique({
+-    where: { id: payload.sub },
+-    select: {
+-      id: true,
+-      name: true,
+-      email: true,
+-      role: true,
+-      avatarUrl: true,
+-      institutionId: true,
+-      deletedAt: true,
+-    },
+-  });
++  const user = await getCachedUser(payload.sub);
+ 
+   if (!user || user.deletedAt) {
+     throw new ApiError(401, 'Usuário não encontrado ou conta desativada.');
+@@ -56,6 +75,31 @@
+ });
+ 
+ /**
++ * Authentication for the SSE stream. EventSource cannot send headers, so the
++ * short-lived, purpose-scoped stream token is read from `?token=`.
++ */
++export const authenticateStreamToken = asyncHandler(async (req, _res, next) => {
++  const token = String(req.query.token || '').trim();
++  if (!token) throw new ApiError(401, 'Não autenticado.');
++
++  let payload;
++  try {
++    payload = verifyToken(token);
++  } catch {
++    throw new ApiError(401, 'Sessão inválida ou expirada.');
++  }
++  if (payload.purpose !== 'stream') {
++    throw new ApiError(401, 'Token inválido para este recurso.');
++  }
++
++  const user = await getCachedUser(payload.sub);
++  if (!user || user.deletedAt) throw new ApiError(401, 'Usuário não encontrado ou conta desativada.');
++
++  req.user = user;
++  next();
++});
++
++/**
+  * Optional authentication: sets req.user if present, never rejects.
+  */
+ export const optionalAuthenticate = asyncHandler(async (req, _res, next) => {
+@@ -63,10 +107,7 @@
+   if (token) {
+     try {
+       const payload = verifyToken(token);
+-      const user = await prisma.user.findUnique({
+-        where: { id: payload.sub },
+-        select: { id: true, name: true, email: true, role: true, avatarUrl: true, institutionId: true },
+-      });
++      const user = await getCachedUser(payload.sub);
+       if (user && !user.deletedAt) req.user = user;
+     } catch {
+       // ignore invalid optional token
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/middlewares/rateLimiter.js ./backend/src/middlewares/rateLimiter.js
+--- /tmp/v8orig/backend/src/middlewares/rateLimiter.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/middlewares/rateLimiter.js	2026-09-15 22:30:21.087643292 +0000
+@@ -1,13 +1,22 @@
+ import rateLimit from 'express-rate-limit';
+ import { env } from '../config/env.js';
+ 
+-/** General API rate limit. */
++const tooMany = (message) => ({ success: false, message });
++
++/**
++ * General API rate limit.
++ *
++ * Raised default (600 / 15min) so that many legitimate participants behind the
++ * same NAT/campus network are not blocked, while still absorbing abusive floods.
++ * Health checks and preflight requests are never counted.
++ */
+ export const apiLimiter = rateLimit({
+   windowMs: env.rateLimitWindowMs,
+   max: env.rateLimitMax,
+   standardHeaders: true,
+   legacyHeaders: false,
+-  message: { success: false, message: 'Muitas requisições. Tente novamente mais tarde.' },
++  skip: (req) => req.method === 'OPTIONS' || req.path === '/health' || req.path === '/health/',
++  message: tooMany('Muitas requisições. Tente novamente mais tarde.'),
+ });
+ 
+ /** Stricter limit for auth endpoints (brute-force protection). */
+@@ -16,5 +25,31 @@
+   max: env.authRateLimitMax,
+   standardHeaders: true,
+   legacyHeaders: false,
+-  message: { success: false, message: 'Muitas tentativas de login. Aguarde alguns minutos.' },
++  message: tooMany('Muitas tentativas de login. Aguarde alguns minutos.'),
++});
++
++/**
++ * Limit for CPU/IO-expensive endpoints: exports, certificate issuance
++ * (single + mass), order creation, payment/PIX generation and registration.
++ * These are the endpoints that, if hammered, block the event loop or hold
++ * transactions open.
++ */
++export const heavyLimiter = rateLimit({
++  windowMs: 60 * 1000,
++  max: Number(process.env.HEAVY_RATE_LIMIT_MAX || 30),
++  standardHeaders: true,
++  legacyHeaders: false,
++  message: tooMany('Muitas operações em pouco tempo. Aguarde um instante e tente novamente.'),
++});
++
++/**
++ * Limit for opening SSE streams — prevents a single client from opening
++ * thousands of long-lived connections.
++ */
++export const streamLimiter = rateLimit({
++  windowMs: 60 * 1000,
++  max: Number(process.env.STREAM_RATE_LIMIT_MAX || 30),
++  standardHeaders: true,
++  legacyHeaders: false,
++  message: tooMany('Muitas conexões em tempo real. Aguarde um instante.'),
+ });
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/routes/admin.routes.js ./backend/src/routes/admin.routes.js
+--- /tmp/v8orig/backend/src/routes/admin.routes.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/routes/admin.routes.js	2026-09-15 22:33:49.062204365 +0000
+@@ -1,6 +1,7 @@
+ import { Router } from 'express';
+ import { validate } from '../middlewares/validate.js';
+ import { authenticate, authorize } from '../middlewares/auth.js';
++import { heavyLimiter } from '../middlewares/rateLimiter.js';
+ import { adminUserSchemas, institutionSchemas, exportSchemas } from '../validations/schemas.js';
+ import * as ctrl from '../controllers/adminController.js';
+ import * as reportCtrl from '../controllers/reportController.js';
+@@ -34,6 +35,6 @@
+ router.get('/reports', reportCtrl.reports);
+ 
+ // Export
+-router.post('/export/:type', validate(exportSchemas), exportCtrl.exportData);
++router.post('/export/:type', heavyLimiter, validate(exportSchemas), exportCtrl.exportData);
+ 
+ export default router;
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/routes/certificate.routes.js ./backend/src/routes/certificate.routes.js
+--- /tmp/v8orig/backend/src/routes/certificate.routes.js	2026-09-15 18:37:49.000000000 +0000
++++ ./backend/src/routes/certificate.routes.js	2026-09-15 22:33:37.034056244 +0000
+@@ -1,6 +1,7 @@
+ import { Router } from 'express';
+ import { validate } from '../middlewares/validate.js';
+ import { authenticate, authorize } from '../middlewares/auth.js';
++import { heavyLimiter } from '../middlewares/rateLimiter.js';
+ import { certificateSchemas } from '../validations/schemas.js';
+ import * as ctrl from '../controllers/certificateController.js';
+ 
+@@ -16,10 +17,10 @@
+ router.get('/:id/download', validate(certificateSchemas.idParam), ctrl.downloadCertificatePdf);
+ 
+ // Admin only
+-router.post('/issue', authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.issue), ctrl.issueCertificate);
+-router.post('/:id/correct', authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.correct), ctrl.correctCertificate);
++router.post('/issue', heavyLimiter, authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.issue), ctrl.issueCertificate);
++router.post('/:id/correct', heavyLimiter, authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.correct), ctrl.correctCertificate);
+ router.post('/:id/cancel', authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.cancel), ctrl.cancelCertificate);
+-router.post('/auto/:eventId', authorize('ADMIN', 'ORGANIZER'), ctrl.runAutoIssue);
++router.post('/auto/:eventId', heavyLimiter, authorize('ADMIN', 'ORGANIZER'), ctrl.runAutoIssue);
+ router.get('/admin/list', authorize('ADMIN', 'ORGANIZER'), ctrl.listCertificates);
+ 
+ export default router;
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/routes/conversations.routes.js ./backend/src/routes/conversations.routes.js
+--- /tmp/v8orig/backend/src/routes/conversations.routes.js	2026-09-15 17:41:06.000000000 +0000
++++ ./backend/src/routes/conversations.routes.js	2026-09-15 22:31:25.972442298 +0000
+@@ -14,6 +14,7 @@
+ router.post('/admin/start', authorize('ADMIN', 'ORGANIZER'), validate(conversationSchemas.adminStart), ctrl.adminStart);
+ router.post('/', validate(conversationSchemas.start), ctrl.start);
+ router.get('/:id', validate(conversationSchemas.idParam), ctrl.getOne);
++router.get('/:id/messages', validate(conversationSchemas.idParam), ctrl.messagesSince);
+ router.post('/:id/messages', validate(conversationSchemas.message), ctrl.send);
+ router.post('/:id/read', validate(conversationSchemas.idParam), ctrl.markRead);
+ router.post('/:id/status', authorize('ADMIN', 'ORGANIZER'), validate(conversationSchemas.status), ctrl.setStatus);
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/routes/index.js ./backend/src/routes/index.js
+--- /tmp/v8orig/backend/src/routes/index.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/routes/index.js	2026-09-15 22:30:43.311916961 +0000
+@@ -16,11 +16,14 @@
+ import couponRoutes from './coupons.routes.js';
+ import orderRoutes from './orders.routes.js';
+ import conversationRoutes from './conversations.routes.js';
++import realtimeRoutes from './realtime.routes.js';
+ 
+ const router = Router();
+ 
++// Lightweight liveness probe. Intentionally does NOT hit the database, so it
++// stays fast and never becomes a bottleneck under load.
+ router.get('/health', (_req, res) =>
+-  res.json({ success: true, message: 'AcadeConnect API online', data: { time: new Date().toISOString() } })
++  res.json({ success: true, message: 'AcadeConnect API online', data: { time: new Date().toISOString(), uptime: Math.round(process.uptime()) } })
+ );
+ 
+ router.use('/auth', authRoutes);
+@@ -39,6 +42,7 @@
+ router.use('/coupons', couponRoutes);
+ router.use('/orders', orderRoutes);
+ router.use('/conversations', conversationRoutes);
++router.use('/realtime', realtimeRoutes);
+ router.use('/admin', adminRoutes);
+ 
+ export default router;
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/routes/orders.routes.js ./backend/src/routes/orders.routes.js
+--- /tmp/v8orig/backend/src/routes/orders.routes.js	2026-09-15 18:37:37.000000000 +0000
++++ ./backend/src/routes/orders.routes.js	2026-09-15 22:33:40.618100380 +0000
+@@ -1,6 +1,7 @@
+ import { Router } from 'express';
+ import { validate } from '../middlewares/validate.js';
+ import { authenticate, authorize } from '../middlewares/auth.js';
++import { heavyLimiter } from '../middlewares/rateLimiter.js';
+ import { orderSchemas } from '../validations/orderSchemas.js';
+ import * as ctrl from '../controllers/orderController.js';
+ 
+@@ -9,7 +10,7 @@
+ 
+ router.get('/mine', ctrl.mine);
+ router.get('/admin/list', authorize('ADMIN', 'ORGANIZER'), ctrl.adminList);
+-router.post('/', validate(orderSchemas.create), ctrl.create);
++router.post('/', heavyLimiter, validate(orderSchemas.create), ctrl.create);
+ router.get('/:id', validate(orderSchemas.idParam), ctrl.getOne);
+ router.post('/:id/pay', validate(orderSchemas.idParam), ctrl.pay);
+ router.post('/:id/cancel', validate(orderSchemas.idParam), ctrl.cancel);
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/routes/realtime.routes.js ./backend/src/routes/realtime.routes.js
+--- /tmp/v8orig/backend/src/routes/realtime.routes.js	1970-01-01 00:00:00.000000000 +0000
++++ ./backend/src/routes/realtime.routes.js	2026-09-15 22:33:52.450246080 +0000
+@@ -0,0 +1,14 @@
++import { Router } from 'express';
++import { authenticate, authenticateStreamToken } from '../middlewares/auth.js';
++import { streamLimiter } from '../middlewares/rateLimiter.js';
++import * as ctrl from '../controllers/realtimeController.js';
++
++const router = Router();
++
++// Authenticated: get a short-lived token for the SSE stream.
++router.post('/token', authenticate, streamLimiter, ctrl.streamToken);
++
++// SSE stream. Auth is via the short-lived ?token= (EventSource limitation).
++router.get('/stream', streamLimiter, authenticateStreamToken, ctrl.stream);
++
++export default router;
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/routes/registration.routes.js ./backend/src/routes/registration.routes.js
+--- /tmp/v8orig/backend/src/routes/registration.routes.js	2026-09-15 18:37:37.000000000 +0000
++++ ./backend/src/routes/registration.routes.js	2026-09-15 22:33:46.290170225 +0000
+@@ -1,6 +1,7 @@
+ import { Router } from 'express';
+ import { validate } from '../middlewares/validate.js';
+ import { authenticate, authorize } from '../middlewares/auth.js';
++import { heavyLimiter } from '../middlewares/rateLimiter.js';
+ import { registrationSchemas } from '../validations/schemas.js';
+ import * as ctrl from '../controllers/registrationController.js';
+ 
+@@ -10,9 +11,9 @@
+ 
+ router.get('/me', ctrl.getMyRegistrations);
+ router.get('/:id', validate(registrationSchemas.idParam), ctrl.getRegistration);
+-router.post('/:eventId', validate(registrationSchemas.create), ctrl.registerForEvent);
++router.post('/:eventId', heavyLimiter, validate(registrationSchemas.create), ctrl.registerForEvent);
+ router.delete('/:id', validate(registrationSchemas.idParam), ctrl.cancelRegistration);
+-router.post('/:id/payment', validate(registrationSchemas.idParam), ctrl.generatePayment);
++router.post('/:id/payment', heavyLimiter, validate(registrationSchemas.idParam), ctrl.generatePayment);
+ 
+ // Restauração/ajuste administrativo da inscrição e atividades
+ router.put('/:id/admin', authorize('ADMIN', 'ORGANIZER'), validate(registrationSchemas.adminUpdate), ctrl.adminUpdateRegistration);
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/server.js ./backend/src/server.js
+--- /tmp/v8orig/backend/src/server.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/server.js	2026-09-15 22:30:38.463857265 +0000
+@@ -1,21 +1,31 @@
+ import { createApp } from './app.js';
+-import { prisma } from './config/prisma.js';
++import { prisma, warmupPrisma, disconnectPrisma } from './config/prisma.js';
+ import { env } from './config/env.js';
+ 
+ const app = createApp();
+ 
++let server = null;
++
+ async function start() {
+   try {
+-    await prisma.$connect();
++    // Warm the pool before accepting traffic so the first request does not pay
++    // the connection handshake (cold start).
++    await warmupPrisma();
+     // eslint-disable-next-line no-console
+     console.log('✅ Banco de dados conectado (PostgreSQL).');
+ 
+-    app.listen(env.port, () => {
++    server = app.listen(env.port, () => {
+       // eslint-disable-next-line no-console
+       console.log(`🚀 AcadeConnect API rodando em http://localhost:${env.port}`);
+       // eslint-disable-next-line no-console
+       console.log(`   Health check: http://localhost:${env.port}/api/health`);
+     });
++
++    // Behind a load balancer / reverse proxy (Render), keep connections alive
++    // long enough to avoid a new TLS handshake per request, but let the proxy
++    // close first. Node defaults can drop idle connections too eagerly.
++    server.keepAliveTimeout = Number(process.env.KEEP_ALIVE_TIMEOUT_MS || 65000);
++    server.headersTimeout = Number(process.env.HEADERS_TIMEOUT_MS || 66000);
+   } catch (err) {
+     // eslint-disable-next-line no-console
+     console.error('❌ Falha ao conectar ao banco de dados:', err.message);
+@@ -25,12 +35,31 @@
+ 
+ start();
+ 
++async function shutdown(signal) {
++  // eslint-disable-next-line no-console
++  console.log(`\n${signal} recebido. Encerrando com segurança...`);
++  try {
++    if (server) {
++      await new Promise((resolve) => server.close(resolve));
++    }
++    await disconnectPrisma();
++  } finally {
++    process.exit(0);
++  }
++}
++
+ // Graceful shutdown
+-process.on('SIGTERM', async () => {
+-  await prisma.$disconnect();
+-  process.exit(0);
++process.on('SIGTERM', () => shutdown('SIGTERM'));
++process.on('SIGINT', () => shutdown('SIGINT'));
++
++// Never let an unexpected rejection kill the process silently.
++process.on('unhandledRejection', (reason) => {
++  // eslint-disable-next-line no-console
++  console.error('[unhandledRejection]', reason);
+ });
+-process.on('SIGINT', async () => {
+-  await prisma.$disconnect();
+-  process.exit(0);
++process.on('uncaughtException', (err) => {
++  // eslint-disable-next-line no-console
++  console.error('[uncaughtException]', err);
+ });
++
++export { app, prisma };
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/services/certificateService.js ./backend/src/services/certificateService.js
+--- /tmp/v8orig/backend/src/services/certificateService.js	2026-09-15 18:37:49.000000000 +0000
++++ ./backend/src/services/certificateService.js	2026-09-15 22:33:28.985957128 +0000
+@@ -55,7 +55,15 @@
+     },
+   });
+   if (!registration) throw new ApiError(404, 'Inscrição não encontrada.');
++  return issueEventCertificateFromLoaded(registration, { operatorId, force });
++}
+ 
++/**
++ * Same as above but using an already-loaded registration (with user, event,
++ * activityRegistrations, attendance and certificates included). Used by the
++ * bulk path so it does NOT re-query per participant (N+1 fix).
++ */
++async function issueEventCertificateFromLoaded(registration, { operatorId = null, force = false } = {}) {
+   const { event } = registration;
+   // Ignora versões canceladas: uma correção pode emitir uma nova versão válida.
+   const existing = registration.certificates.find((c) => c.activityId === null && c.status !== 'CANCELLED');
+@@ -90,6 +98,7 @@
+     activityId: null,
+     hours,
+     participantName: registration.user.name,
++    participantEmail: registration.user.email,
+     eventName: event.name,
+     eventDate: event.startDate,
+     responsible: event.organizer?.name || null,
+@@ -129,6 +138,7 @@
+     activityId,
+     hours,
+     participantName: registration.user.name,
++    participantEmail: registration.user.email,
+     eventName: registration.event.name,
+     eventDate: activity?.date || registration.event.startDate,
+     activityName: activity?.name || null,
+@@ -147,6 +157,7 @@
+   activityId,
+   hours,
+   participantName,
++  participantEmail = null,
+   eventName,
+   eventDate,
+   activityName = null,
+@@ -181,7 +192,7 @@
+   fs.mkdirSync(uploadsRoot, { recursive: true });
+   const filename = `certificado-${code}.pdf`;
+   const pdfPath = path.join(uploadsRoot, filename);
+-  fs.writeFileSync(pdfPath, pdf);
++  await fs.promises.writeFile(pdfPath, pdf);
+ 
+   const certificate = await prisma.certificate.create({
+     data: {
+@@ -207,9 +218,9 @@
+     link: notificationOverride?.link || '/certificados',
+   });
+ 
+-  if (env.emailEnabled) {
++  if (env.emailEnabled && participantEmail) {
+     const tpl = emailTemplates.certificate(participantName, eventName, code, validationUrl);
+-    await sendEmail({ to: (await prisma.user.findUnique({ where: { id: userId } })).email, ...tpl });
++    await sendEmail({ to: participantEmail, ...tpl });
+   }
+ 
+   await createAuditLog({
+@@ -223,8 +234,18 @@
+   return certificate;
+ }
+ 
++// Bound the amount of registration rows loaded per batch during mass issuance.
++const ISSUE_BATCH_SIZE = 50;
++
+ /**
+  * Run automatic certificate generation for all eligible registrations of an event.
++ *
++ * Concurrency/performance notes:
++ *  - Eligibility is computed with ONE batched query set (no per-registration N+1).
++ *  - Registrations are then loaded in bounded batches (instead of one heavy
++ *    include query per participant), so memory stays flat on large events.
++ *  - The operation is intentionally sequential inside the batch to avoid
++ *    saturating the PDF generator / event loop.
+  */
+ export async function autoIssueCertificatesForEvent(eventId) {
+   const event = await prisma.event.findUnique({
+@@ -257,9 +278,6 @@
+     }),
+   ]);
+ 
+-  // reqCount = atividades exigidas em que o participante está inscrito
+-  // present  = presenças registradas nessas mesmas atividades
+-  // (mesma fórmula/regra de antes, apenas calculada em memória)
+   const reqCountByReg = new Map();
+   for (const ar of activityRegs) {
+     reqCountByReg.set(ar.registrationId, (reqCountByReg.get(ar.registrationId) || 0) + 1);
+@@ -271,19 +289,41 @@
+   }
+   const hasCert = new Set(existingCerts.map((c) => c.registrationId));
+ 
+-  let issued = 0;
++  // Participants that pass the attendance threshold and still need a certificate.
++  const toIssue = [];
+   let skipped = 0;
+   let notEligible = 0;
+   for (const reg of eligibleRegs) {
+-    // Já possui certificado válido -> não duplica.
+     if (hasCert.has(reg.id)) { skipped += 1; continue; }
+     const reqCount = reqCountByReg.get(reg.id) || 0;
+     const present = presentByReg.get(reg.id) || 0;
+     const percentage = reqCount === 0 ? 0 : Math.round((present / reqCount) * 100);
+     if (reqCount === 0 || percentage < event.minimumAttendancePercentage) { notEligible += 1; continue; }
+-    await issueEventCertificate(reg.id);
+-    issued += 1;
++    toIssue.push(reg.id);
++  }
++
++  let issued = 0;
++  for (let i = 0; i < toIssue.length; i += ISSUE_BATCH_SIZE) {
++    const batchIds = toIssue.slice(i, i + ISSUE_BATCH_SIZE);
++    // One query per batch instead of one per participant.
++    // eslint-disable-next-line no-await-in-loop
++    const loaded = await prisma.registration.findMany({
++      where: { id: { in: batchIds } },
++      include: {
++        user: true,
++        event: { include: { organizer: { select: { name: true } } } },
++        activityRegistrations: { include: { activity: true } },
++        attendance: true,
++        certificates: true,
++      },
++    });
++    for (const reg of loaded) {
++      // eslint-disable-next-line no-await-in-loop
++      await issueEventCertificateFromLoaded(reg, {});
++      issued += 1;
++    }
+   }
++
+   return { issued, skipped, notEligible };
+ }
+ 
+@@ -334,7 +374,7 @@
+   const original = await prisma.certificate.findUnique({
+     where: { id: certificateId },
+     include: {
+-      user: { select: { id: true, name: true } },
++      user: { select: { id: true, name: true, email: true } },
+       event: { include: { organizer: { select: { name: true } } } },
+       activity: true,
+     },
+@@ -356,6 +396,7 @@
+     activityId: original.activityId,
+     hours: correctedHours,
+     participantName: correctedName,
++    participantEmail: original.user.email,
+     eventName: correctedEvent,
+     eventDate: original.activity?.date || original.event.startDate,
+     activityName: original.activity?.name || null,
+@@ -395,5 +436,3 @@
+ 
+   return { previous, certificate: newCertificate };
+ }
+-
+-
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/services/conversationService.js ./backend/src/services/conversationService.js
+--- /tmp/v8orig/backend/src/services/conversationService.js	2026-09-15 17:41:06.000000000 +0000
++++ ./backend/src/services/conversationService.js	2026-09-15 22:38:13.557461477 +0000
+@@ -1,7 +1,8 @@
+ import { prisma } from '../config/prisma.js';
+ import { ApiError } from '../utils/apiError.js';
+ import { createAuditLog } from './auditLogService.js';
+-import { createNotification } from './notificationService.js';
++import { createNotification, createNotifications } from './notificationService.js';
++import { publishToUser } from './realtime.js';
+ 
+ const conversationInclude = {
+   user: { select: { id: true, name: true, email: true, role: true } },
+@@ -9,6 +10,11 @@
+   messages: { orderBy: { createdAt: 'asc' }, include: { sender: { select: { id: true, name: true, role: true } } } },
+ };
+ 
++// Hard caps so a single request can never return an unbounded result set.
++const MAX_CONVERSATIONS = 100;
++const MAX_MESSAGES = 200;
++const DEFAULT_MESSAGE_WINDOW = 100;
++
+ /** Garante que o solicitante pode acessar a conversa (dono ou staff). */
+ async function authorizeConversation(conversationId, requester) {
+   const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } });
+@@ -39,15 +45,19 @@
+   });
+ }
+ 
+-export async function listMyConversations(userId) {
++export async function listMyConversations(userId, { page = 1, limit = MAX_CONVERSATIONS } = {}) {
++  const take = Math.min(Number(limit) || MAX_CONVERSATIONS, MAX_CONVERSATIONS);
+   return prisma.conversation.findMany({
+     where: { userId },
+     include: { assignedTo: { select: { id: true, name: true } }, _count: { select: { messages: true } } },
+     orderBy: { lastMessageAt: 'desc' },
++    skip: (Math.max(Number(page) || 1, 1) - 1) * take,
++    take,
+   });
+ }
+ 
+-export async function listAllConversations({ status, search } = {}) {
++export async function listAllConversations({ status, search, page = 1, limit = MAX_CONVERSATIONS } = {}) {
++  const take = Math.min(Number(limit) || MAX_CONVERSATIONS, MAX_CONVERSATIONS);
+   return prisma.conversation.findMany({
+     where: {
+       ...(status ? { status } : {}),
+@@ -55,12 +65,56 @@
+     },
+     include: { user: { select: { id: true, name: true, email: true } }, assignedTo: { select: { id: true, name: true } }, _count: { select: { messages: true } } },
+     orderBy: { lastMessageAt: 'desc' },
++    skip: (Math.max(Number(page) || 1, 1) - 1) * take,
++    take,
+   });
+ }
+ 
+ export async function getConversation(id, requester) {
+   await authorizeConversation(id, requester);
+-  return prisma.conversation.findUnique({ where: { id }, include: conversationInclude });
++  const conversation = await prisma.conversation.findUnique({
++    where: { id },
++    include: {
++      user: { select: { id: true, name: true, email: true, role: true } },
++      assignedTo: { select: { id: true, name: true, role: true } },
++    },
++  });
++  if (!conversation) throw new ApiError(404, 'Conversa não encontrada.');
++  // Return the most RECENT messages (bounded), oldest-first, instead of the
++  // entire history — a long thread must not become an unbounded response.
++  const recentDesc = await prisma.message.findMany({
++    where: { conversationId: id },
++    orderBy: { createdAt: 'desc' },
++    include: { sender: { select: { id: true, name: true, role: true } } },
++    take: MAX_MESSAGES,
++  });
++  return { ...conversation, messages: recentDesc.reverse() };
++}
++
++/**
++ * Incremental fetch used by the live conversation hook: returns ONLY messages
++ * newer than `since` (ISO). The periodic refresh therefore transfers a few
++ * bytes instead of re-downloading the whole thread every 5 seconds.
++ *
++ * Uses `gte` + client-side de-duplication by id so two messages written in the
++ * same millisecond are never skipped.
++ */
++export async function getMessagesSince(id, requester, since = null) {
++  const conversation = await authorizeConversation(id, requester);
++  const sinceDate = since ? new Date(since) : null;
++  const validSince = sinceDate && !Number.isNaN(sinceDate.getTime()) ? sinceDate : null;
++
++  const messages = await prisma.message.findMany({
++    where: { conversationId: id, ...(validSince ? { createdAt: { gte: validSince } } : {}) },
++    orderBy: { createdAt: 'asc' },
++    include: { sender: { select: { id: true, name: true, role: true } } },
++    take: MAX_MESSAGES,
++  });
++
++  return {
++    conversation: { id: conversation.id, status: conversation.status, lastMessageAt: conversation.lastMessageAt },
++    messages,
++  };
+ }
+ 
+ /** Cria a conversa com a primeira mensagem. */
+@@ -120,6 +174,7 @@
+     message: 'Você recebeu uma nova mensagem da administração.',
+     link: '/comunicacao',
+   });
++  publishToUser(target.id, { type: 'conversation', conversationId: conversation.id });
+ 
+   return prisma.conversation.findUnique({ where: { id: conversation.id }, include: conversationInclude });
+ }
+@@ -145,14 +200,18 @@
+ 
+   // Notifica o outro lado (participante <-> admin).
+   if (requester.role === 'PARTICIPANT') {
+-    const admins = await listAdmins();
+-    await Promise.all(
+-      admins.map((a) =>
+-        createNotification({ userId: a.id, type: 'SYSTEM', title: 'Nova mensagem de participante', message: `Nova mensagem de ${requester.name}.`, link: '/admin/comunicacao' })
+-      )
++    // Single bulk INSERT instead of one query per admin (N+1 fix).
++    const admins = await prisma.user.findMany({
++      where: { role: { in: ['ADMIN', 'ORGANIZER'] }, deletedAt: null },
++      select: { id: true },
++    });
++    await createNotifications(
++      admins.map((a) => a.id),
++      { type: 'SYSTEM', title: 'Nova mensagem de participante', message: `Nova mensagem de ${requester.name}.`, link: '/admin/comunicacao' }
+     );
+   } else {
+     await createNotification({ userId: conversation.userId, type: 'SYSTEM', title: 'Nova resposta da organização', message: 'Você recebeu uma resposta.', link: '/comunicacao' });
++    publishToUser(conversation.userId, { type: 'message', conversationId: id });
+   }
+   return message;
+ }
+@@ -162,6 +221,7 @@
+   await authorizeConversation(id, { id: operatorId, role: 'ADMIN' });
+   const updated = await prisma.conversation.update({ where: { id }, data: { status } });
+   await createAuditLog({ userId: operatorId, action: 'CONVERSATION_STATUS_CHANGED', resource: 'Conversation', resourceId: id, details: { status } });
++  publishToUser(updated.userId, { type: 'conversation', conversationId: id });
+   return updated;
+ }
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/services/notificationService.js ./backend/src/services/notificationService.js
+--- /tmp/v8orig/backend/src/services/notificationService.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/services/notificationService.js	2026-09-15 22:29:46.707219915 +0000
+@@ -1,16 +1,54 @@
+ import { prisma } from '../config/prisma.js';
++import { publishToUser, publishToUsers } from './realtime.js';
+ 
+ /**
+  * Create an in-app notification for a user.
++ * Also pushes it over SSE so the bell/badge updates without polling.
+  */
+ export async function createNotification({ userId, type = 'SYSTEM', title, message, link = null }) {
+   try {
+-    return await prisma.notification.create({
++    const notification = await prisma.notification.create({
+       data: { userId, type, title, message, link },
+     });
++    publishToUser(userId, { type: 'notification', notification });
++    return notification;
+   } catch (err) {
+     // eslint-disable-next-line no-console
+     console.error('Notification create failed', err.message);
+     return null;
+   }
+ }
++
++/**
++ * Bulk notification creation.
++ *
++ * Replaces the previous N+1 pattern (one INSERT + one round-trip per user,
++ * e.g. notifying every registered participant of an event change, or every
++ * admin of a new participant message). One INSERT for all rows and one SSE
++ * event per recipient.
++ *
++ * Returns the number of rows created (0 when the list is empty).
++ */
++export async function createNotifications(recipients, payload) {
++  const rows = [...new Set((recipients || []).filter(Boolean))].map((userId) => ({
++    userId,
++    type: payload.type || 'SYSTEM',
++    title: payload.title,
++    message: payload.message,
++    link: payload.link || null,
++  }));
++  if (rows.length === 0) return 0;
++  try {
++    const result = await prisma.notification.createMany({ data: rows });
++    // Minimal SSE payload (no ids) — the client just refreshes its counters.
++    publishToUsers(rows.map((r) => r.userId), {
++      type: 'notification',
++      notification: { type: payload.type || 'SYSTEM', title: payload.title, message: payload.message },
++    });
++    return result.count;
++  } catch (err) {
++    // eslint-disable-next-line no-console
++    console.error('Notification bulk create failed', err.message);
++    return 0;
++  }
++}
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/services/orderService.js ./backend/src/services/orderService.js
+--- /tmp/v8orig/backend/src/services/orderService.js	2026-09-15 18:42:09.000000000 +0000
++++ ./backend/src/services/orderService.js	2026-09-15 22:31:39.436608102 +0000
+@@ -5,6 +5,7 @@
+ import { validateCoupon, computeDiscountCents } from './couponService.js';
+ import { createPayment } from './paymentService.js';
+ import { generateOrderCode } from '../utils/codes.js';
++import { invalidate } from '../utils/cache.js';
+ 
+ const orderInclude = {
+   items: true,
+@@ -88,8 +89,13 @@
+   return order;
+ }
+ 
+-export async function listMyOrders(userId) {
+-  return prisma.order.findMany({ where: { userId }, include: orderInclude, orderBy: { createdAt: 'desc' } });
++export async function listMyOrders(userId, { limit = 100 } = {}) {
++  return prisma.order.findMany({
++    where: { userId },
++    include: orderInclude,
++    orderBy: { createdAt: 'desc' },
++    take: Math.min(Math.max(Number(limit) || 100, 1), 200),
++  });
+ }
+ 
+ export async function listOrders({ status, page = 1, limit = 20, search } = {}) {
+@@ -160,6 +166,7 @@
+   });
+ 
+   await createNotification({ userId, type: 'SYSTEM', title: 'Pedido cancelado', message: `Seu pedido ${order.code} foi cancelado.`, link: '/meus-pedidos' });
++  invalidate('products:public');
+   await createAuditLog({ userId, action: 'ORDER_CANCELLED', resource: 'Order', resourceId: id });
+   return updated;
+ }
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/services/paymentService.js ./backend/src/services/paymentService.js
+--- /tmp/v8orig/backend/src/services/paymentService.js	2026-09-15 18:42:09.000000000 +0000
++++ ./backend/src/services/paymentService.js	2026-09-15 22:31:33.152530715 +0000
+@@ -73,22 +73,39 @@
+   const txid = code.replace(/[^A-Za-z0-9]/g, '');
+   const pixPayload = buildPayloadWith(pix, { amountCents: amount, txid, description });
+ 
+-  const payment = await prisma.payment.create({
+-    data: {
+-      code,
+-      userId,
+-      eventId,
+-      registrationId,
+-      orderId,
+-      amountCents: amount,
+-      status: 'PENDING',
+-      pixConfigId: pix.id,
+-      pixPayload,
+-      txid,
+-      expiresAt,
+-    },
+-    include: paymentInclude,
+-  });
++  let payment;
++  try {
++    payment = await prisma.payment.create({
++      data: {
++        code,
++        userId,
++        eventId,
++        registrationId,
++        orderId,
++        amountCents: amount,
++        status: 'PENDING',
++        pixConfigId: pix.id,
++        pixPayload,
++        txid,
++        expiresAt,
++      },
++      include: paymentInclude,
++    });
++  } catch (err) {
++    // Idempotency under concurrency: two simultaneous requests for the same
++    // registration/order both pass the reuse check, but the @@unique constraint
++    // (registrationId / orderId) lets only one create win. The loser must NOT
++    // fail with a 500 — it returns the payment that was actually created.
++    if (err?.code === 'P2002') {
++      const existing = registrationId
++        ? await prisma.payment.findUnique({ where: { registrationId }, include: paymentInclude })
++        : orderId
++          ? await prisma.payment.findUnique({ where: { orderId }, include: paymentInclude })
++          : null;
++      if (existing) return existing;
++    }
++    throw err;
++  }
+ 
+   await createNotification({
+     userId,
+@@ -115,13 +132,18 @@
+   return payment;
+ }
+ 
+-export async function listMyPayments(userId) {
++export async function listMyPayments(userId, { limit = 100 } = {}) {
+   // Expira de forma ociosa os PIX vencidos que ainda constam como PENDING.
+   await prisma.payment.updateMany({
+     where: { userId, status: 'PENDING', expiresAt: { lte: new Date() } },
+     data: { status: 'EXPIRED' },
+   });
+-  return prisma.payment.findMany({ where: { userId }, include: paymentInclude, orderBy: { createdAt: 'desc' } });
++  return prisma.payment.findMany({
++    where: { userId },
++    include: paymentInclude,
++    orderBy: { createdAt: 'desc' },
++    take: Math.min(Math.max(Number(limit) || 100, 1), 200),
++  });
+ }
+ 
+ export async function listPayments({ status, eventId, userId, page = 1, limit = 20, search } = {}) {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/services/productService.js ./backend/src/services/productService.js
+--- /tmp/v8orig/backend/src/services/productService.js	2026-09-15 18:37:37.000000000 +0000
++++ ./backend/src/services/productService.js	2026-09-15 22:31:46.536695537 +0000
+@@ -2,27 +2,37 @@
+ import { ApiError } from '../utils/apiError.js';
+ import { publicUrl } from '../config/multer.js';
+ import { createAuditLog } from './auditLogService.js';
++import { cacheWrap, invalidate } from '../utils/cache.js';
++import { env } from '../config/env.js';
++
++const MAX_PRODUCTS = 200;
++const PUBLIC_KEY = 'products:public';
+ 
+ function enrich(p) {
+   if (p?.imageUrl) p.imageUrl = publicUrl(p.imageUrl);
+   return p;
+ }
+ 
+-/** Lista pública (loja) — apenas ativos. */
++/** Lista pública (loja) — apenas ativos. Cacheada por curto período. */
+ export async function listPublicProducts({ search } = {}) {
+-  const products = await prisma.product.findMany({
+-    where: {
+-      deletedAt: null,
+-      status: 'ACTIVE',
+-      ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
+-    },
+-    orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }],
+-  });
++  const key = search ? `${PUBLIC_KEY}:search:${search.toLowerCase()}` : PUBLIC_KEY;
++  const products = await cacheWrap(key, env.publicCacheTtlMs, () =>
++    prisma.product.findMany({
++      where: {
++        deletedAt: null,
++        status: 'ACTIVE',
++        ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
++      },
++      orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }],
++      take: MAX_PRODUCTS,
++    })
++  );
+   return products.map(enrich);
+ }
+ 
+ /** Lista administrativa — inclui inativos, exclui removidos. */
+-export async function listAdminProducts({ search, status } = {}) {
++export async function listAdminProducts({ search, status, page = 1, limit = MAX_PRODUCTS } = {}) {
++  const take = Math.min(Number(limit) || MAX_PRODUCTS, MAX_PRODUCTS);
+   const products = await prisma.product.findMany({
+     where: {
+       deletedAt: null,
+@@ -30,6 +40,8 @@
+       ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
+     },
+     orderBy: { createdAt: 'desc' },
++    skip: (Math.max(Number(page) || 1, 1) - 1) * take,
++    take,
+   });
+   return products.map(enrich);
+ }
+@@ -52,6 +64,7 @@
+       stock: data.stock === undefined || data.stock === null || data.stock === '' ? null : Number(data.stock),
+     },
+   });
++  invalidate(PUBLIC_KEY);
+   await createAuditLog({ userId: operatorId, action: 'PRODUCT_CREATED', resource: 'Product', resourceId: product.id, details: { priceCents: product.priceCents } });
+   return enrich(product);
+ }
+@@ -71,6 +84,7 @@
+       ...(file ? { imageUrl: file.filename } : {}),
+     },
+   });
++  invalidate(PUBLIC_KEY);
+   await createAuditLog({ userId: operatorId, action: 'PRODUCT_UPDATED', resource: 'Product', resourceId: id, details: { priceCents: product.priceCents } });
+   return enrich(product);
+ }
+@@ -80,6 +94,7 @@
+   const existing = await prisma.product.findUnique({ where: { id } });
+   if (!existing || existing.deletedAt) throw new ApiError(404, 'Produto não encontrado.');
+   await prisma.product.update({ where: { id }, data: { deletedAt: new Date(), status: 'INACTIVE' } });
++  invalidate(PUBLIC_KEY);
+   await createAuditLog({ userId: operatorId, action: 'PRODUCT_REMOVED', resource: 'Product', resourceId: id });
+   return { removed: true };
+ }
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/services/raffleService.js ./backend/src/services/raffleService.js
+--- /tmp/v8orig/backend/src/services/raffleService.js	2026-09-15 17:27:06.000000000 +0000
++++ ./backend/src/services/raffleService.js	2026-09-15 22:31:56.068812921 +0000
+@@ -3,6 +3,11 @@
+ import { ApiError } from '../utils/apiError.js';
+ import { createAuditLog } from './auditLogService.js';
+ import { createNotification } from './notificationService.js';
++import { cacheWrap, invalidate } from '../utils/cache.js';
++import { env } from '../config/env.js';
++
++const RESULTS_KEY = 'raffles:results';
++const MAX_RAFFLES = 200;
+ 
+ /**
+  * Participantes elegíveis = inscrições CONFIRMADAS do evento cujo usuário não
+@@ -32,6 +37,7 @@
+       _count: { select: { winners: true } },
+     },
+     orderBy: { createdAt: 'desc' },
++    take: MAX_RAFFLES,
+   });
+ }
+ 
+@@ -40,21 +46,26 @@
+  * Qualquer usuário autenticado pode consultar.
+  */
+ export async function listPublicResults({ eventId } = {}) {
+-  return prisma.raffle.findMany({
+-    where: { ...(eventId ? { eventId } : {}) },
+-    select: {
+-      id: true,
+-      prize: true,
+-      status: true,
+-      createdAt: true,
+-      event: { select: { id: true, name: true } },
+-      winners: {
+-        select: { id: true, prizeSnapshot: true, drawnAt: true, user: { select: { name: true } } },
+-        orderBy: { drawnAt: 'desc' },
++  const key = eventId ? `${RESULTS_KEY}:${eventId}` : RESULTS_KEY;
++  return cacheWrap(key, env.publicCacheTtlMs, () =>
++    prisma.raffle.findMany({
++      where: { ...(eventId ? { eventId } : {}) },
++      select: {
++        id: true,
++        prize: true,
++        status: true,
++        createdAt: true,
++        event: { select: { id: true, name: true } },
++        winners: {
++          select: { id: true, prizeSnapshot: true, drawnAt: true, user: { select: { name: true } } },
++          orderBy: { drawnAt: 'desc' },
++          take: 50,
++        },
+       },
+-    },
+-    orderBy: { createdAt: 'desc' },
+-  });
++      orderBy: { createdAt: 'desc' },
++      take: MAX_RAFFLES,
++    })
++  );
+ }
+ 
+ export async function getRaffle(id) {
+@@ -96,6 +107,7 @@
+   });
+   const eligible = await eligibleRegistrations(prisma, eventId, raffle.id, raffle.allowRepeat);
+   const updated = await prisma.raffle.update({ where: { id: raffle.id }, data: { eligibleCount: eligible.length } });
++  invalidate(RESULTS_KEY);
+   await createAuditLog({ userId: operatorId, action: 'RAFFLE_CREATED', resource: 'Raffle', resourceId: raffle.id, details: { eventId, prize } });
+   return { raffle: updated, eligibleCount: eligible.length };
+ }
+@@ -147,6 +159,7 @@
+     };
+   });
+ 
++  invalidate(RESULTS_KEY);
+   await createNotification({
+     userId: result.winner.userId,
+     type: 'SYSTEM',
+@@ -163,6 +176,7 @@
+   if (!raffle) throw new ApiError(404, 'Sorteio não encontrado.');
+   if (!['OPEN', 'CLOSED', 'CANCELLED'].includes(status)) throw new ApiError(422, 'Status de sorteio inválido.');
+   const updated = await prisma.raffle.update({ where: { id }, data: { status } });
++  invalidate(RESULTS_KEY);
+   await createAuditLog({ userId: operatorId, action: 'RAFFLE_STATUS_CHANGED', resource: 'Raffle', resourceId: id, details: { status } });
+   return updated;
+ }
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/services/realtime.js ./backend/src/services/realtime.js
+--- /tmp/v8orig/backend/src/services/realtime.js	1970-01-01 00:00:00.000000000 +0000
++++ ./backend/src/services/realtime.js	2026-09-15 22:29:42.051162576 +0000
+@@ -0,0 +1,50 @@
++import { EventEmitter } from 'node:events';
++
++/**
++ * In-process pub/sub hub backing Server-Sent Events (SSE).
++ *
++ * Goal: stop the frontend from polling message/notification endpoints every few
++ * seconds. Instead of `200 users x 12 polls/min`, each open tab holds ONE
++ * persistent HTTP connection and receives only what actually changed.
++ *
++ * Scope/limits (documented honestly):
++ *  - Events are delivered to connections attached to THIS process. With a single
++ *    Render instance this covers all users. If the service is later scaled to
++ *    multiple instances, a shared broker (Redis pub/sub) would be required; the
++ *    optimized polling fallback on the frontend keeps things correct until then.
++ *  - No loop/security change: the hub only carries already-authorized, minimal
++ *    payloads (id + title), never tokens or full records.
++ */
++
++class RealtimeHub extends EventEmitter {}
++
++const hub = new RealtimeHub();
++// Users open at most a few connections; keep the cap generous but explicit.
++hub.setMaxListeners(0);
++
++const userChannel = (userId) => `user:${userId}`;
++
++/** Subscribe to a user's stream. Returns an unsubscribe function. */
++export function subscribeUser(userId, listener) {
++  const channel = userChannel(userId);
++  hub.on(channel, listener);
++  return () => hub.off(channel, listener);
++}
++
++/** Push an event to a single user's open streams. */
++export function publishToUser(userId, event) {
++  if (!userId) return;
++  hub.emit(userChannel(userId), event);
++}
++
++/** Push the same event to several users (batched notifications). */
++export function publishToUsers(userIds, event) {
++  for (const id of new Set((userIds || []).filter(Boolean))) {
++    publishToUser(id, event);
++  }
++}
++
++/** How many listeners a user currently has (diagnostics/tests). */
++export function listenerCount(userId) {
++  return hub.listenerCount(userChannel(userId));
++}
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/utils/cache.js ./backend/src/utils/cache.js
+--- /tmp/v8orig/backend/src/utils/cache.js	1970-01-01 00:00:00.000000000 +0000
++++ ./backend/src/utils/cache.js	2026-09-15 22:29:36.219090761 +0000
+@@ -0,0 +1,88 @@
++/**
++ * Tiny in-process TTL cache for read-heavy, low-write data (public event list,
++ * product store, raffle results, dashboard aggregates...).
++ *
++ * Deliberately dependency-free and in-memory:
++ *  - No Redis is introduced just for the sake of it. The prompt explicitly says
++ *    the solution must be proportional to the problem.
++ *  - Single backend instance (Render) => a process-local cache removes the
++ *    repeated identical queries that dominate concurrent traffic.
++ *
++ * Correctness rules:
++ *  - ONLY use for data that may be a few seconds stale.
++ *  - NEVER cache per-user private data (ownership/authorization must stay exact).
++ *  - Invalidate the relevant prefix after any write that changes the data.
++ */
++
++const store = new Map();
++let hits = 0;
++let misses = 0;
++
++// Periodic sweep so expired entries do not grow the heap forever.
++const sweep = setInterval(() => {
++  const now = Date.now();
++  for (const [key, entry] of store) {
++    if (entry.expiresAt <= now) store.delete(key);
++  }
++}, 60_000);
++if (sweep.unref) sweep.unref();
++
++export function cacheGet(key) {
++  const entry = store.get(key);
++  if (!entry) {
++    misses += 1;
++    return undefined;
++  }
++  if (entry.expiresAt <= Date.now()) {
++    store.delete(key);
++    misses += 1;
++    return undefined;
++  }
++  hits += 1;
++  return entry.value;
++}
++
++export function cacheSet(key, value, ttlMs = 10_000) {
++  store.set(key, { value, expiresAt: Date.now() + ttlMs });
++  return value;
++}
++
++/**
++ * Return the cached value, or compute + store it.
++ * Concurrent callers share the same in-flight promise (single-flight), so a
++ * burst of identical requests triggers ONE database query instead of N.
++ */
++const inflight = new Map();
++
++export async function cacheWrap(key, ttlMs, producer) {
++  const cached = cacheGet(key);
++  if (cached !== undefined) return cached;
++
++  if (inflight.has(key)) return inflight.get(key);
++
++  const promise = Promise.resolve()
++    .then(producer)
++    .then((value) => {
++      cacheSet(key, value, ttlMs);
++      return value;
++    })
++    .finally(() => inflight.delete(key));
++
++  inflight.set(key, promise);
++  return promise;
++}
++
++/** Drop every key that starts with `prefix` (call after a mutation). */
++export function invalidate(prefix = '') {
++  if (!prefix) {
++    store.clear();
++    return;
++  }
++  for (const key of store.keys()) {
++    if (key.startsWith(prefix)) store.delete(key);
++  }
++}
++
++export function cacheStats() {
++  return { size: store.size, hits, misses, inflight: inflight.size };
++}
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/backend/src/utils/jwt.js ./backend/src/utils/jwt.js
+--- /tmp/v8orig/backend/src/utils/jwt.js	2026-09-15 15:55:43.000000000 +0000
++++ ./backend/src/utils/jwt.js	2026-09-15 22:29:49.515254494 +0000
+@@ -1,8 +1,8 @@
+ import jwt from 'jsonwebtoken';
+ import { env } from '../config/env.js';
+ 
+-export function signToken(payload) {
+-  return jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
++export function signToken(payload, { expiresIn = env.jwtExpiresIn } = {}) {
++  return jwt.sign(payload, env.jwtSecret, { expiresIn });
+ }
+ 
+ export function verifyToken(token) {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/frontend/src/api/realtime.js ./frontend/src/api/realtime.js
+--- /tmp/v8orig/frontend/src/api/realtime.js	1970-01-01 00:00:00.000000000 +0000
++++ ./frontend/src/api/realtime.js	2026-09-15 22:35:08.475182279 +0000
+@@ -0,0 +1,83 @@
++import { api, unwrap, API_BASE_URL } from './client.js';
++
++/**
++ * Singleton Server-Sent Events client.
++ *
++ * One shared connection per browser tab (instead of one per component), used by
++ * the header bell, the sidebar message badge and the conversation thread. This
++ * is what removes the recurring polling traffic.
++ *
++ * If SSE is unavailable (proxy strips it, backend restarts...), the connection
++ * retries with exponential backoff and the components keep their (now slower and
++ * incremental) polling fallback, so the UI is never wrong — only slightly less
++ * instant.
++ */
++
++const listeners = new Set();
++let es = null;
++let connecting = false;
++let reconnectTimer = null;
++let attempts = 0;
++
++function scheduleReconnect() {
++  if (reconnectTimer || typeof window === 'undefined') return;
++  const delay = Math.min(30_000, 2_000 * 2 ** Math.min(attempts, 4));
++  attempts += 1;
++  reconnectTimer = setTimeout(() => {
++    reconnectTimer = null;
++    connect();
++  }, delay);
++}
++
++async function connect() {
++  if (connecting || es || typeof window === 'undefined') return;
++  connecting = true;
++  try {
++    const res = await api.post('/realtime/token').then(unwrap);
++    const token = res?.data?.token;
++    if (!token) throw new Error('no stream token');
++
++    const base = API_BASE_URL.replace(/\/$/, '');
++    es = new EventSource(`${base}/realtime/stream?token=${encodeURIComponent(token)}`);
++
++    es.onopen = () => { attempts = 0; };
++    es.onmessage = (e) => {
++      let evt;
++      try { evt = JSON.parse(e.data); } catch { return; }
++      for (const handler of listeners) {
++        try { handler(evt); } catch { /* isolate listener errors */ }
++      }
++    };
++    es.onerror = () => {
++      try { es.close(); } catch { /* ignore */ }
++      es = null;
++      scheduleReconnect();
++    };
++  } catch {
++    scheduleReconnect();
++  } finally {
++    connecting = false;
++  }
++}
++
++/**
++ * Subscribe to realtime events. Returns an unsubscribe function.
++ * Opens the shared connection on the first subscriber.
++ */
++export function subscribeRealtime(handler) {
++  listeners.add(handler);
++  connect();
++  return () => {
++    listeners.delete(handler);
++    if (listeners.size === 0) closeRealtime();
++  };
++}
++
++export function closeRealtime() {
++  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
++  if (es) {
++    try { es.close(); } catch { /* ignore */ }
++    es = null;
++  }
++  attempts = 0;
++}
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/frontend/src/api/services.js ./frontend/src/api/services.js
+--- /tmp/v8orig/frontend/src/api/services.js	2026-09-15 18:38:19.000000000 +0000
++++ ./frontend/src/api/services.js	2026-09-15 22:35:22.095350001 +0000
+@@ -223,6 +223,8 @@
+   adminList: (params) => api.get('/conversations/admin/list', { params }).then(unwrap),
+   adminStart: (data) => api.post('/conversations/admin/start', data).then(unwrap),
+   get: (id) => api.get(`/conversations/${id}`).then(unwrap),
++  // Incremental refresh: returns only messages newer than `since` (ISO date).
++  messagesSince: (id, since) => api.get(`/conversations/${id}/messages`, { params: { since } }).then(unwrap),
+   start: (data) => api.post('/conversations', data).then(unwrap),
+   send: (id, body) => api.post(`/conversations/${id}/messages`, { body }).then(unwrap),
+   setStatus: (id, status) => api.post(`/conversations/${id}/status`, { status }).then(unwrap),
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/frontend/src/components/Header.jsx ./frontend/src/components/Header.jsx
+--- /tmp/v8orig/frontend/src/components/Header.jsx	2026-09-15 15:55:43.000000000 +0000
++++ ./frontend/src/components/Header.jsx	2026-09-15 22:35:32.175474132 +0000
+@@ -5,6 +5,7 @@
+ import { useAuth } from '../context/AuthContext';
+ import { useTheme } from '../context/ThemeContext';
+ import { notificationApi } from '../api/services';
++import { subscribeRealtime } from '../api/realtime';
+ import { fullNameInitials } from '../utils/format';
+ 
+ const NAV = [
+@@ -29,15 +30,29 @@
+ 
+   useEffect(() => {
+     let active = true;
+-    if (user) {
+-      notificationApi.list({ limit: 8 }).then((res) => {
+-        if (active) {
+-          setNotifs(res.data.notifications || []);
+-          setUnread(res.data.unread || 0);
+-        }
+-      }).catch(() => {});
+-    }
+-    return () => { active = false; };
++    const load = () => {
++      if (!user) return;
++      notificationApi.list({ limit: 8 })
++        .then((res) => {
++          if (active) {
++            setNotifs(res.data.notifications || []);
++            setUnread(res.data.unread || 0);
++          }
++        })
++        .catch(() => {});
++    };
++    load();
++
++    // Push updates from the shared SSE stream (no polling loop); refresh when
++    // the tab regains focus as a cheap consistency check.
++    const unsubscribe = user
++      ? subscribeRealtime((evt) => {
++          if (active && (evt?.type === 'notification' || evt?.type === 'message')) load();
++        })
++      : () => {};
++    const onFocus = () => load();
++    window.addEventListener('focus', onFocus);
++    return () => { active = false; unsubscribe(); window.removeEventListener('focus', onFocus); };
+   }, [user]);
+ 
+   useEffect(() => {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/frontend/src/hooks/useLiveConversation.js ./frontend/src/hooks/useLiveConversation.js
+--- /tmp/v8orig/frontend/src/hooks/useLiveConversation.js	2026-09-15 18:40:27.000000000 +0000
++++ ./frontend/src/hooks/useLiveConversation.js	2026-09-15 22:35:17.639295131 +0000
+@@ -1,15 +1,33 @@
+-import { useEffect, useRef, useState } from 'react';
++import { useCallback, useEffect, useRef, useState } from 'react';
+ import { conversationApi } from '../api/services';
++import { subscribeRealtime } from '../api/realtime';
++
++const MIN_INTERVAL = 5000;
++const MAX_INTERVAL = 60000;
+ 
+ /**
+- * Conversa "ao vivo" sem reload: polling inteligente (pausa em aba inativa),
+- * marcação de leitura e scroll inteligente (só desce se o usuário já está no fim).
++ * Conversa "ao vivo" sem reload.
++ *
++ * Optimization over the previous version (which re-fetched the ENTIRE thread
++ * every 5 seconds, forever):
++ *  - the periodic refresh is INCREMENTAL: it sends ?since=<lastMessageCreatedAt>
++ *    and receives only new messages;
++ *  - it uses an ADAPTIVE interval: 5s while there is activity, backing off up to
++ *    60s when nothing is happening;
++ *  - it PAUSES when the tab is hidden and refreshes immediately when it becomes
++ *    visible again;
++ *  - it reacts to the shared SSE stream, so a new message appears instantly
++ *    without waiting for the next tick;
++ *  - it never issues overlapping requests and cancels timers on unmount.
+  */
+-export function useLiveConversation(conversationId, { intervalMs = 5000 } = {}) {
++export function useLiveConversation(conversationId, { intervalMs = MIN_INTERVAL } = {}) {
+   const [conversation, setConversation] = useState(null);
+   const [loading, setLoading] = useState(false);
+   const threadRef = useRef(null);
+   const stickToBottomRef = useRef(true);
++  const lastAtRef = useRef(null);
++  const timerRef = useRef(null);
++  const delayRef = useRef(intervalMs);
+ 
+   const onScroll = () => {
+     const el = threadRef.current;
+@@ -17,31 +35,117 @@
+     stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+   };
+ 
+-  const fetchOnce = async () => {
+-    try {
+-      const res = await conversationApi.get(conversationId);
+-      setConversation(res.data?.conversation || null);
+-    } catch {
+-      /* mantém o estado atual */
++  /** Merge only messages we have not seen yet (de-dup by id). */
++  const applyMessages = useCallback((incoming) => {
++    if (!incoming || incoming.length === 0) return;
++    setConversation((prev) => {
++      if (!prev) return prev;
++      const seen = new Set((prev.messages || []).map((m) => m.id));
++      const merged = (prev.messages || []).slice();
++      let added = 0;
++      for (const m of incoming) {
++        if (!seen.has(m.id)) {
++          merged.push(m);
++          seen.add(m.id);
++          added += 1;
++        }
++      }
++      if (added === 0) return prev; // no re-render when nothing changed
++      merged.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
++      return {
++        ...prev,
++        messages: merged,
++        lastMessageAt: merged[merged.length - 1]?.createdAt || prev.lastMessageAt,
++      };
++    });
++    lastAtRef.current = incoming[incoming.length - 1].createdAt;
++  }, []);
++
++  const fetchInitial = useCallback(async () => {
++    const res = await conversationApi.get(conversationId);
++    const conv = res.data?.conversation || null;
++    setConversation(conv);
++    lastAtRef.current = conv?.messages?.length ? conv.messages[conv.messages.length - 1].createdAt : null;
++    return conv;
++  }, [conversationId]);
++
++  const fetchIncremental = useCallback(async () => {
++    if (!lastAtRef.current) {
++      await fetchInitial();
++      return 0;
+     }
+-  };
++    const res = await conversationApi.messagesSince(conversationId, lastAtRef.current);
++    const msgs = res.data?.messages || [];
++    if (msgs.length) applyMessages(msgs);
++    const meta = res.data?.conversation;
++    if (meta) {
++      setConversation((prev) => (prev ? { ...prev, status: meta.status, lastMessageAt: meta.lastMessageAt } : prev));
++    }
++    return msgs.length;
++  }, [conversationId, fetchInitial, applyMessages]);
+ 
+   useEffect(() => {
+-    if (!conversationId) { setConversation(null); return undefined; }
+-    let active = true;
++    if (!conversationId) {
++      setConversation(null);
++      return undefined;
++    }
++    let cancelled = false;
+     setLoading(true);
+-    conversationApi.get(conversationId)
+-      .then((res) => { if (active) setConversation(res.data?.conversation || null); })
++    lastAtRef.current = null;
++    delayRef.current = intervalMs;
++
++    let tick;
++    const schedule = (delay) => {
++      if (cancelled) return;
++      timerRef.current = setTimeout(tick, delay);
++    };
++
++    tick = async () => {
++      if (cancelled) return;
++      // Pause polling entirely while the tab is in the background.
++      if (typeof document !== 'undefined' && document.hidden) {
++        schedule(intervalMs);
++        return;
++      }
++      try {
++        const newCount = await fetchIncremental();
++        delayRef.current = newCount > 0 ? intervalMs : Math.min(delayRef.current * 2, MAX_INTERVAL);
++      } catch {
++        delayRef.current = Math.min(delayRef.current * 2, MAX_INTERVAL);
++      }
++      schedule(delayRef.current);
++    };
++
++    fetchInitial()
+       .catch(() => {})
+-      .finally(() => { if (active) setLoading(false); });
++      .finally(() => { if (!cancelled) setLoading(false); });
++    schedule(intervalMs);
+ 
+-    const timer = setInterval(() => {
+-      if (typeof document !== 'undefined' && document.hidden) return; // pausa polling em aba inativa
+-      if (active) fetchOnce();
+-    }, intervalMs);
+-    return () => { active = false; clearInterval(timer); };
+-    // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [conversationId, intervalMs]);
++    // Instant update when the server pushes a message for this conversation.
++    const unsubscribe = subscribeRealtime((evt) => {
++      if (evt?.type === 'message' && evt.conversationId === conversationId) {
++        delayRef.current = intervalMs;
++        if (timerRef.current) clearTimeout(timerRef.current);
++        tick();
++      }
++    });
++
++    const onVisibility = () => {
++      if (typeof document !== 'undefined' && !document.hidden) {
++        delayRef.current = intervalMs;
++        if (timerRef.current) clearTimeout(timerRef.current);
++        tick();
++      }
++    };
++    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
++
++    return () => {
++      cancelled = true;
++      if (timerRef.current) clearTimeout(timerRef.current);
++      unsubscribe();
++      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
++    };
++  }, [conversationId, intervalMs, fetchInitial, fetchIncremental]);
+ 
+   // Scroll inteligente: só força o fim quando o usuário já estava no fim.
+   useEffect(() => {
+@@ -52,7 +156,7 @@
+   const markRead = () => {
+     if (conversationId) conversationApi.markRead(conversationId).catch(() => {});
+   };
+-  const reload = () => fetchOnce();
++  const reload = () => fetchIncremental().catch(() => {});
+ 
+   return { conversation, loading, threadRef, onScroll, markRead, reload };
+ }
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/frontend/src/layouts/DashboardLayout.jsx ./frontend/src/layouts/DashboardLayout.jsx
+--- /tmp/v8orig/frontend/src/layouts/DashboardLayout.jsx	2026-09-15 17:29:23.000000000 +0000
++++ ./frontend/src/layouts/DashboardLayout.jsx	2026-09-15 22:35:27.823420537 +0000
+@@ -6,6 +6,7 @@
+ import { useTheme } from '../context/ThemeContext';
+ import { Moon, Sun } from 'lucide-react';
+ import { conversationApi } from '../api/services';
++import { subscribeRealtime } from '../api/realtime';
+ 
+ const LINKS = [
+   { to: '/minha-area', label: 'Minha área', icon: Home },
+@@ -34,8 +35,19 @@
+         .then((r) => active && setUnreadMsgs(r.data?.unread || 0))
+         .catch(() => {});
+     load();
+-    const timer = setInterval(load, 60000);
+-    return () => { active = false; clearInterval(timer); };
++
++    // The badge updates instantly from the shared SSE stream; the slow interval
++    // is only a safety net and is paused while the tab is hidden.
++    const timer = setInterval(() => {
++      if (typeof document !== 'undefined' && document.hidden) return;
++      load();
++    }, 120000);
++    const unsubscribe = subscribeRealtime((evt) => {
++      if (active && (evt?.type === 'message' || evt?.type === 'conversation' || evt?.type === 'notification')) {
++        load();
++      }
++    });
++    return () => { active = false; clearInterval(timer); unsubscribe(); };
+   }, []);
+ 
+   const handleLogout = async () => {
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/frontend/src/pages/Home.jsx ./frontend/src/pages/Home.jsx
+--- /tmp/v8orig/frontend/src/pages/Home.jsx	2026-09-15 15:55:43.000000000 +0000
++++ ./frontend/src/pages/Home.jsx	2026-09-15 22:35:48.855679537 +0000
+@@ -15,7 +15,7 @@
+ 
+ export default function Home() {
+   const navigate = useNavigate();
+-  const { data, loading, error } = useApi(() => eventApi.list({ limit: 3, status: 'OPEN' }).then((r) => r.data.events), []);
++  const { data, loading, error, reload } = useApi(() => eventApi.list({ limit: 3, status: 'OPEN' }).then((r) => r.data.events), []);
+ 
+   const handleSearch = (e) => {
+     e.preventDefault();
+@@ -70,7 +70,7 @@
+             <h2>Próximos eventos</h2>
+           </div>
+           {loading && <Spinner text="Carregando eventos..." />}
+-          {error && <ErrorState title="Não foi possível carregar os eventos." description="Tente novamente em instantes." onRetry={() => window.location.reload()} />}
++          {error && <ErrorState title="Não foi possível carregar os eventos." description="Tente novamente em instantes." onRetry={reload} />}
+           {!loading && !error && (
+             <>
+               <div className="grid">
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=.git' '--exclude=uploads' /tmp/v8orig/frontend/src/pages/admin/AdminEventoForm.jsx ./frontend/src/pages/admin/AdminEventoForm.jsx
+--- /tmp/v8orig/frontend/src/pages/admin/AdminEventoForm.jsx	2026-09-15 15:55:43.000000000 +0000
++++ ./frontend/src/pages/admin/AdminEventoForm.jsx	2026-09-15 22:35:51.967717858 +0000
+@@ -58,7 +58,7 @@
+   const [banner, setBanner] = useState(null);
+   const [saving, setSaving] = useState(false);
+ 
+-  const { data, loading, error } = useApi(
++  const { data, loading, error, reload } = useApi(
+     () => (isEdit ? eventApi.get(id).then((r) => r.data) : Promise.resolve(null)),
+     [id],
+     { immediate: isEdit }
+@@ -104,7 +104,7 @@
+   };
+ 
+   if (loading) return <Spinner text="Carregando evento..." />;
+-  if (error) return <ErrorState onRetry={() => window.location.reload()} />;
++  if (error) return <ErrorState onRetry={reload} />;
+ 
+   return (
+     <>

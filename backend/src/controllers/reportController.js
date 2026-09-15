@@ -31,7 +31,7 @@ export const reports = asyncHandler(async (req, res) => {
     ...(Object.keys(period).length ? { createdAt: period } : {}),
   };
 
-  const [totalInscritos, presentRegs, totalCertificados, registrations] = await Promise.all([
+  const [totalInscritos, presentRegs, totalCertificados, totalAtividadesParticipadas, regsByEvent] = await Promise.all([
     prisma.registration.count({ where: regWhere }),
     // Distinct participants with at least one presence in the filtered scope.
     prisma.attendance.findMany({
@@ -43,7 +43,11 @@ export const reports = asyncHandler(async (req, res) => {
     // registration status filter must not be forwarded here (it caused a Prisma
     // validation error when filtering by CONFIRMED/CANCELLED).
     prisma.certificate.count({ where: { ...(eventId ? { eventId } : {}) } }),
-    prisma.registration.findMany({ where: regWhere, include: { _count: { select: { attendance: true } }, event: { select: { name: true } } } }),
+    // Aggregate in the DATABASE. The previous implementation loaded every
+    // matching registration + its attendance rows just to sum them in JS, which
+    // is exactly the kind of unbounded work that collapses under traffic.
+    prisma.attendance.count({ where: { registration: regWhere } }),
+    prisma.registration.groupBy({ by: ['eventId'], where: regWhere, _count: { _all: true } }),
   ]);
 
   const totalPresentes = presentRegs.length;
@@ -66,7 +70,13 @@ export const reports = asyncHandler(async (req, res) => {
     : [];
   const actMap = Object.fromEntries(activities.map((a) => [a.id, a.name]));
 
-  const totalAtividadesParticipadas = registrations.reduce((acc, r) => acc + r._count.attendance, 0);
+  // Names for the per-event breakdown (only the events that actually appear).
+  const eventIds = regsByEvent.map((r) => r.eventId);
+  const eventRows = eventIds.length
+    ? await prisma.event.findMany({ where: { id: { in: eventIds } }, select: { id: true, name: true } })
+    : [];
+  const eventNameMap = Object.fromEntries(eventRows.map((e) => [e.id, e.name]));
+
   const percentualPresenca = totalInscritos === 0 ? 0 : Math.min(100, Math.round((totalPresentes / totalInscritos) * 100));
 
   return apiResponse(res, {
@@ -84,9 +94,9 @@ export const reports = asyncHandler(async (req, res) => {
         activity: actMap[x.activityId] || 'Atividade',
         count: x._count._all,
       })),
-      porEvento: registrations.reduce((acc, r) => {
-        const name = r.event?.name || 'Evento';
-        acc[name] = (acc[name] || 0) + 1;
+      porEvento: regsByEvent.reduce((acc, r) => {
+        const name = eventNameMap[r.eventId] || 'Evento';
+        acc[name] = (acc[name] || 0) + r._count._all;
         return acc;
       }, {}),
     },

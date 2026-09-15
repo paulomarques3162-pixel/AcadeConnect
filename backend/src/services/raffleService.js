@@ -3,6 +3,11 @@ import { prisma } from '../config/prisma.js';
 import { ApiError } from '../utils/apiError.js';
 import { createAuditLog } from './auditLogService.js';
 import { createNotification } from './notificationService.js';
+import { cacheWrap, invalidate } from '../utils/cache.js';
+import { env } from '../config/env.js';
+
+const RESULTS_KEY = 'raffles:results';
+const MAX_RAFFLES = 200;
 
 /**
  * Participantes elegíveis = inscrições CONFIRMADAS do evento cujo usuário não
@@ -32,6 +37,7 @@ export async function listRaffles({ eventId } = {}) {
       _count: { select: { winners: true } },
     },
     orderBy: { createdAt: 'desc' },
+    take: MAX_RAFFLES,
   });
 }
 
@@ -40,21 +46,26 @@ export async function listRaffles({ eventId } = {}) {
  * Qualquer usuário autenticado pode consultar.
  */
 export async function listPublicResults({ eventId } = {}) {
-  return prisma.raffle.findMany({
-    where: { ...(eventId ? { eventId } : {}) },
-    select: {
-      id: true,
-      prize: true,
-      status: true,
-      createdAt: true,
-      event: { select: { id: true, name: true } },
-      winners: {
-        select: { id: true, prizeSnapshot: true, drawnAt: true, user: { select: { name: true } } },
-        orderBy: { drawnAt: 'desc' },
+  const key = eventId ? `${RESULTS_KEY}:${eventId}` : RESULTS_KEY;
+  return cacheWrap(key, env.publicCacheTtlMs, () =>
+    prisma.raffle.findMany({
+      where: { ...(eventId ? { eventId } : {}) },
+      select: {
+        id: true,
+        prize: true,
+        status: true,
+        createdAt: true,
+        event: { select: { id: true, name: true } },
+        winners: {
+          select: { id: true, prizeSnapshot: true, drawnAt: true, user: { select: { name: true } } },
+          orderBy: { drawnAt: 'desc' },
+          take: 50,
+        },
       },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+      orderBy: { createdAt: 'desc' },
+      take: MAX_RAFFLES,
+    })
+  );
 }
 
 export async function getRaffle(id) {
@@ -96,6 +107,7 @@ export async function createRaffle({ eventId, prize, allowRepeat = false }, oper
   });
   const eligible = await eligibleRegistrations(prisma, eventId, raffle.id, raffle.allowRepeat);
   const updated = await prisma.raffle.update({ where: { id: raffle.id }, data: { eligibleCount: eligible.length } });
+  invalidate(RESULTS_KEY);
   await createAuditLog({ userId: operatorId, action: 'RAFFLE_CREATED', resource: 'Raffle', resourceId: raffle.id, details: { eventId, prize } });
   return { raffle: updated, eligibleCount: eligible.length };
 }
@@ -147,6 +159,7 @@ export async function drawRaffle(id, operatorId) {
     };
   });
 
+  invalidate(RESULTS_KEY);
   await createNotification({
     userId: result.winner.userId,
     type: 'SYSTEM',
@@ -163,6 +176,7 @@ export async function setRaffleStatus(id, status, operatorId) {
   if (!raffle) throw new ApiError(404, 'Sorteio não encontrado.');
   if (!['OPEN', 'CLOSED', 'CANCELLED'].includes(status)) throw new ApiError(422, 'Status de sorteio inválido.');
   const updated = await prisma.raffle.update({ where: { id }, data: { status } });
+  invalidate(RESULTS_KEY);
   await createAuditLog({ userId: operatorId, action: 'RAFFLE_STATUS_CHANGED', resource: 'Raffle', resourceId: id, details: { status } });
   return updated;
 }

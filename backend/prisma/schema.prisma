@@ -184,6 +184,7 @@ model User {
 
   @@index([email])
   @@index([role])
+@@index([createdAt])
 }
 
 model Event {
@@ -233,6 +234,9 @@ model Event {
 
   @@index([status])
   @@index([slug])
+@@index([deletedAt, status])
+@@index([deletedAt, createdAt])
+@@index([startDate])
 }
 
 model Speaker {
@@ -281,6 +285,7 @@ model Activity {
 
   @@index([eventId])
   @@index([date])
+@@index([eventId, date])
 }
 
 model Registration {
@@ -306,6 +311,9 @@ model Registration {
   @@unique([userId, eventId])
   @@index([eventId])
   @@index([userId])
+@@index([eventId, status])
+@@index([createdAt])
+@@index([eventId, createdAt])
 }
 
 model ActivityRegistration {
@@ -319,6 +327,7 @@ model ActivityRegistration {
   activity     Activity     @relation(fields: [activityId], references: [id], onDelete: Cascade)
 
   @@unique([registrationId, activityId])
+@@index([activityId, status])
 }
 
 model Attendance {
@@ -341,6 +350,8 @@ model Attendance {
   @@unique([registrationId, activityId])
   @@index([activityId])
   @@index([userId])
+@@index([eventId])
+@@index([eventId, recordedAt])
 }
 
 model Certificate {
@@ -377,6 +388,8 @@ model Certificate {
   // Várias versões (original + correções) podem coexistir para o mesmo usuário/evento.
   @@index([userId, eventId, activityId])
   @@index([code])
+@@index([eventId])
+@@index([userId, issueDate])
 }
 
 model Notification {
@@ -393,6 +406,8 @@ model Notification {
 
   @@index([userId])
   @@index([read])
+@@index([userId, read])
+@@index([userId, createdAt])
 }
 
 model AuditLog {
@@ -409,6 +424,7 @@ model AuditLog {
 
   @@index([action])
   @@index([createdAt])
+@@index([userId])
 }
 
 // ============================================================
@@ -463,6 +479,9 @@ model Payment {
   @@index([userId])
   @@index([status])
   @@index([eventId])
+@@index([status, expiresAt])
+@@index([createdAt])
+@@index([userId, createdAt])
 }
 
 // ============================================================
@@ -485,6 +504,8 @@ model Product {
   orderItems OrderItem[]
 
   @@index([status])
+@@index([status, deletedAt])
+@@index([status, featured])
 }
 
 model Coupon {
@@ -506,6 +527,7 @@ model Coupon {
 
   @@index([code])
   @@index([active])
+@@index([active, deletedAt])
 }
 
 model Order {
@@ -528,6 +550,8 @@ model Order {
 
   @@index([userId])
   @@index([status])
+@@index([createdAt])
+@@index([userId, createdAt])
 }
 
 model OrderItem {
@@ -565,6 +589,8 @@ model Conversation {
 
   @@index([userId])
   @@index([status])
+@@index([lastMessageAt])
+@@index([userId, lastMessageAt])
 }
 
 model Message {
@@ -580,6 +606,8 @@ model Message {
   sender       User         @relation("MessageSender", fields: [senderId], references: [id])
 
   @@index([conversationId])
+@@index([conversationId, createdAt])
+@@index([conversationId, readAt])
 }
 
 // ============================================================
@@ -602,6 +630,7 @@ model Raffle {
   winners   RaffleWinner[]
 
   @@index([eventId])
+@@index([createdAt])
 }
 
 model RaffleWinner {

@@ -5,6 +5,7 @@ import { Logo } from './Logo';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { notificationApi } from '../api/services';
+import { subscribeRealtime } from '../api/realtime';
 import { fullNameInitials } from '../utils/format';
 
 const NAV = [
@@ -29,15 +30,58 @@ export function Header() {
 
   useEffect(() => {
     let active = true;
-    if (user) {
-      notificationApi.list({ limit: 8 }).then((res) => {
+    let requestTimer = null;
+    let inFlight = false;
+    let lastLoadAt = 0;
+
+    const load = async () => {
+      if (!user || !active || inFlight) return;
+      inFlight = true;
+      try {
+        const res = await notificationApi.list({ limit: 8 });
         if (active) {
           setNotifs(res.data.notifications || []);
           setUnread(res.data.unread || 0);
+          lastLoadAt = Date.now();
         }
-      }).catch(() => {});
-    }
-    return () => { active = false; };
+      } catch {
+        // keep the last known notifications
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const scheduleLoad = (delay = 200) => {
+      if (!active || requestTimer) return;
+      requestTimer = setTimeout(() => {
+        requestTimer = null;
+        load();
+      }, delay);
+    };
+
+    load();
+
+    // Only notification events refresh the notification list. A message event
+    // is not a second reason to fetch /notifications because the backend already
+    // emits the notification event for user-facing messages.
+    const unsubscribe = user
+      ? subscribeRealtime((evt) => {
+          if (active && evt?.type === 'notification') scheduleLoad();
+        })
+      : () => {};
+
+    const onFocus = () => {
+      // Focus is only a consistency check, not a polling mechanism.
+      if (Date.now() - lastLoadAt > 30000) scheduleLoad();
+    };
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      active = false;
+      if (requestTimer) clearTimeout(requestTimer);
+      unsubscribe();
+      window.removeEventListener('focus', onFocus);
+    };
   }, [user]);
 
   useEffect(() => {

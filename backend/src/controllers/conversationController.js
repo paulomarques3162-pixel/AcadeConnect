@@ -13,18 +13,27 @@ export const unreadCount = asyncHandler(async (req, res) => {
 });
 
 export const mine = asyncHandler(async (req, res) => {
-  const conversations = await svc.listMyConversations(req.user.id);
+  const conversations = await svc.listMyConversations(req.user.id, req.query);
   return apiResponse(res, { message: 'Minhas conversas.', data: { conversations } });
 });
 
 export const adminList = asyncHandler(async (req, res) => {
-  const conversations = await svc.listAllConversations({ status: req.query.status, search: req.query.search });
+  const conversations = await svc.listAllConversations({ status: req.query.status, search: req.query.search, page: req.query.page, limit: req.query.limit });
   return apiResponse(res, { message: 'Conversas.', data: { conversations } });
 });
 
 export const getOne = asyncHandler(async (req, res) => {
   const conversation = await svc.getConversation(req.params.id, req.user);
   return apiResponse(res, { message: 'Conversa.', data: { conversation } });
+});
+
+/**
+ * Incremental messages endpoint. The live-conversation hook calls this with
+ * `?since=<lastMessageCreatedAt>` so only new messages are transferred.
+ */
+export const messagesSince = asyncHandler(async (req, res) => {
+  const result = await svc.getMessagesSince(req.params.id, req.user, req.query.since);
+  return apiResponse(res, { message: 'Mensagens.', data: result });
 });
 
 export const start = asyncHandler(async (req, res) => {

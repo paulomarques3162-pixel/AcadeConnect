@@ -163,27 +163,42 @@ export const listActivityAttendance = asyncHandler(async (req, res) => {
  */
 export const eventAttendanceSummary = asyncHandler(async (req, res) => {
   const { eventId } = req.params;
-  const activities = await prisma.activity.findMany({
-    where: { eventId },
-    include: {
-      _count: { select: { attendance: true } },
-      registrations: { where: { status: 'CONFIRMED' } },
-      attendance: true,
-    },
-    orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
-  });
+
+  // Aggregate in the DATABASE instead of loading every attendance row of every
+  // activity into memory (which grows linearly with event size).
+  const [activities, enrolledByActivity, presentRows] = await Promise.all([
+    prisma.activity.findMany({
+      where: { eventId },
+      select: { id: true, name: true, type: true, date: true, startTime: true, endTime: true },
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+    }),
+    prisma.activityRegistration.groupBy({
+      by: ['activityId'],
+      where: { activity: { eventId }, status: 'CONFIRMED' },
+      _count: { _all: true },
+    }),
+    // Only the two columns needed to build the distinct registration sets.
+    prisma.attendance.findMany({
+      where: { eventId, status: 'PRESENT' },
+      select: { activityId: true, registrationId: true },
+    }),
+  ]);
+
+  const enrolledMap = new Map(enrolledByActivity.map((x) => [x.activityId, x._count._all]));
+  const presentRegsByActivity = new Map();
+  for (const row of presentRows) {
+    if (!presentRegsByActivity.has(row.activityId)) presentRegsByActivity.set(row.activityId, new Set());
+    presentRegsByActivity.get(row.activityId).add(row.registrationId);
+  }
 
   const summary = activities.map((a) => {
-    const presentes = a.attendance.filter((x) => x.status === 'PRESENT').length;
+    const presentSet = presentRegsByActivity.get(a.id) || new Set();
+    const presentes = presentSet.size;
     // The denominator is the union of enrolled participants and recorded
     // attendees, so an attendance without a prior enrollment never pushes the
     // percentage above 100%.
-    const enrolledCount = a.registrations.length;
-    const presentRegistrationIds = new Set(a.attendance.filter((x) => x.status === 'PRESENT').map((x) => x.registrationId));
-    const inscritos = new Set([
-      ...a.registrations.map((r) => r.registrationId),
-      ...presentRegistrationIds,
-    ]).size || enrolledCount;
+    const enrolledCount = enrolledMap.get(a.id) || 0;
+    const inscritos = Math.max(enrolledCount, presentSet.size);
     const ausentes = Math.max(0, inscritos - presentes);
     const percentual = inscritos === 0 ? 0 : Math.min(100, Math.round((presentes / inscritos) * 100));
     return {

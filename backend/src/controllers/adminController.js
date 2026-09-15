@@ -5,11 +5,23 @@ import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { publicUrl } from '../config/multer.js';
 import { createAuditLog } from '../services/auditLogService.js';
+import { invalidateUserCache } from '../middlewares/auth.js';
+import { cacheWrap, invalidate } from '../utils/cache.js';
+import { env } from '../config/env.js';
+
+const DASHBOARD_CACHE_KEY = 'admin:dashboard';
 
 /**
  * Dashboard with REAL data from the database (no fake numbers).
+ * Cached briefly: this endpoint runs several aggregates and is opened on every
+ * admin page load; concurrent admins would otherwise repeat identical queries.
  */
 export const dashboard = asyncHandler(async (req, res) => {
+  const data = await cacheWrap(DASHBOARD_CACHE_KEY, env.dashboardCacheTtlMs, buildDashboard);
+  return apiResponse(res, { message: 'Dashboard.', data });
+});
+
+async function buildDashboard() {
   const [
     events,
     participants,
@@ -72,34 +84,31 @@ export const dashboard = asyncHandler(async (req, res) => {
     include: { user: { select: { name: true } } },
   });
 
-  return apiResponse(res, {
-    message: 'Dashboard.',
-    data: {
-      stats: {
-        activeEvents,
-        totalEvents: events,
-        participants,
-        registrations,
-        attendance,
-        certificates,
-        activities,
-      },
-      charts: {
-        registrationsPerDay: Object.entries(byDay).map(([date, count]) => ({ date, count })),
-        attendanceByEvent: attendanceByEvent.map((x) => ({ name: nameMap[x.eventId] || 'Evento', count: x._count._all })),
-        participantsPerActivity: participantsPerActivity.map((x) => ({ name: activityNameMap[x.activityId] || 'Atividade', count: x._count._all })).sort((a, b) => b.count - a.count).slice(0, 10),
-        certificatesByStatus: certByStatus.map((x) => ({ status: x.status, count: x._count._all })),
-      },
-      recentActivity: recentActivity.map((a) => ({
-        id: a.id,
-        action: a.action,
-        user: a.user?.name || 'Sistema',
-        resource: a.resource,
-        createdAt: a.createdAt,
-      })),
+  return {
+    stats: {
+      activeEvents,
+      totalEvents: events,
+      participants,
+      registrations,
+      attendance,
+      certificates,
+      activities,
     },
-  });
-});
+    charts: {
+      registrationsPerDay: Object.entries(byDay).map(([date, count]) => ({ date, count })),
+      attendanceByEvent: attendanceByEvent.map((x) => ({ name: nameMap[x.eventId] || 'Evento', count: x._count._all })),
+      participantsPerActivity: participantsPerActivity.map((x) => ({ name: activityNameMap[x.activityId] || 'Atividade', count: x._count._all })).sort((a, b) => b.count - a.count).slice(0, 10),
+      certificatesByStatus: certByStatus.map((x) => ({ status: x.status, count: x._count._all })),
+    },
+    recentActivity: recentActivity.map((a) => ({
+      id: a.id,
+      action: a.action,
+      user: a.user?.name || 'Sistema',
+      resource: a.resource,
+      createdAt: a.createdAt,
+    })),
+  };
+}
 
 // ---------- User management (ADMIN) ----------
 
@@ -144,6 +153,7 @@ export const createUser = asyncHandler(async (req, res) => {
     },
     select: { id: true, name: true, email: true, role: true },
   });
+  invalidate(DASHBOARD_CACHE_KEY);
   await createAuditLog({ userId: req.user.id, action: 'USER_CREATED', resource: 'User', resourceId: user.id, ip: req.ip });
   return apiResponse(res, { status: 201, message: 'Usuário criado.', data: { user } });
 });
@@ -158,6 +168,7 @@ export const updateUser = asyncHandler(async (req, res) => {
     data,
     select: { id: true, name: true, email: true, role: true, course: true },
   });
+  invalidateUserCache(id);
   await createAuditLog({ userId: req.user.id, action: 'USER_UPDATED', resource: 'User', resourceId: id, details: { role }, ip: req.ip });
   return apiResponse(res, { message: 'Usuário atualizado.', data: { user } });
 });
@@ -169,6 +180,7 @@ export const deleteUser = asyncHandler(async (req, res) => {
     where: { id },
     data: { deletedAt: new Date(), email: `deleted-${id.slice(-8)}@removido.local`, name: 'Usuário removido' },
   });
+  invalidateUserCache(id);
   await createAuditLog({ userId: req.user.id, action: 'USER_DELETED', resource: 'User', resourceId: id, ip: req.ip });
   return apiResponse(res, { message: 'Usuário desativado.' });
 });

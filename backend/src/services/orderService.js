@@ -5,6 +5,7 @@ import { createNotification } from './notificationService.js';
 import { validateCoupon, computeDiscountCents } from './couponService.js';
 import { createPayment } from './paymentService.js';
 import { generateOrderCode } from '../utils/codes.js';
+import { invalidate } from '../utils/cache.js';
 
 const orderInclude = {
   items: true,
@@ -88,8 +89,13 @@ export async function createOrder({ userId, items, couponCode = null }) {
   return order;
 }
 
-export async function listMyOrders(userId) {
-  return prisma.order.findMany({ where: { userId }, include: orderInclude, orderBy: { createdAt: 'desc' } });
+export async function listMyOrders(userId, { limit = 100 } = {}) {
+  return prisma.order.findMany({
+    where: { userId },
+    include: orderInclude,
+    orderBy: { createdAt: 'desc' },
+    take: Math.min(Math.max(Number(limit) || 100, 1), 200),
+  });
 }
 
 export async function listOrders({ status, page = 1, limit = 20, search } = {}) {
@@ -160,6 +166,7 @@ export async function cancelOrder(id, userId) {
   });
 
   await createNotification({ userId, type: 'SYSTEM', title: 'Pedido cancelado', message: `Seu pedido ${order.code} foi cancelado.`, link: '/meus-pedidos' });
+  invalidate('products:public');
   await createAuditLog({ userId, action: 'ORDER_CANCELLED', resource: 'Order', resourceId: id });
   return updated;
 }

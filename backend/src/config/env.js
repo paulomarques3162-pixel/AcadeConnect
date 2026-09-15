@@ -31,8 +31,16 @@ export const env = {
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 5),
 
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
-  rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 300),
+  rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 600),
   authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 20),
+
+  // In-memory cache TTL (ms) for read-heavy, low-write public data.
+  publicCacheTtlMs: Number(process.env.PUBLIC_CACHE_TTL_MS || 15000),
+  dashboardCacheTtlMs: Number(process.env.DASHBOARD_CACHE_TTL_MS || 30000),
+
+  // HTTP compression threshold (bytes) and toggle.
+  compressionEnabled: parseBool(process.env.COMPRESSION_ENABLED, true),
+  compressionThreshold: Number(process.env.COMPRESSION_THRESHOLD || 1024),
 
   email: {
     host: process.env.EMAIL_HOST,

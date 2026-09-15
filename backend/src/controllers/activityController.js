@@ -25,7 +25,13 @@ export const listActivities = asyncHandler(async (req, res) => {
   if (eventId) where.eventId = eventId;
   if (id) where.eventId = id;
 
-  const activities = await prisma.activity.findMany({ where, include, orderBy: [{ date: 'asc' }, { startTime: 'asc' }] });
+  const activities = await prisma.activity.findMany({
+    where,
+    include,
+    orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+    // Bounded: an event cannot return an unbounded activity list.
+    take: Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000),
+  });
   return apiResponse(res, { message: 'Atividades.', data: { activities: activities.map(enrich) } });
 });
 

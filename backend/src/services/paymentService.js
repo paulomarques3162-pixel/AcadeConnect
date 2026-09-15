@@ -73,22 +73,39 @@ export async function createPayment({ userId, eventId = null, registrationId = n
   const txid = code.replace(/[^A-Za-z0-9]/g, '');
   const pixPayload = buildPayloadWith(pix, { amountCents: amount, txid, description });
 
-  const payment = await prisma.payment.create({
-    data: {
-      code,
-      userId,
-      eventId,
-      registrationId,
-      orderId,
-      amountCents: amount,
-      status: 'PENDING',
-      pixConfigId: pix.id,
-      pixPayload,
-      txid,
-      expiresAt,
-    },
-    include: paymentInclude,
-  });
+  let payment;
+  try {
+    payment = await prisma.payment.create({
+      data: {
+        code,
+        userId,
+        eventId,
+        registrationId,
+        orderId,
+        amountCents: amount,
+        status: 'PENDING',
+        pixConfigId: pix.id,
+        pixPayload,
+        txid,
+        expiresAt,
+      },
+      include: paymentInclude,
+    });
+  } catch (err) {
+    // Idempotency under concurrency: two simultaneous requests for the same
+    // registration/order both pass the reuse check, but the @@unique constraint
+    // (registrationId / orderId) lets only one create win. The loser must NOT
+    // fail with a 500 — it returns the payment that was actually created.
+    if (err?.code === 'P2002') {
+      const existing = registrationId
+        ? await prisma.payment.findUnique({ where: { registrationId }, include: paymentInclude })
+        : orderId
+          ? await prisma.payment.findUnique({ where: { orderId }, include: paymentInclude })
+          : null;
+      if (existing) return existing;
+    }
+    throw err;
+  }
 
   await createNotification({
     userId,
@@ -115,13 +132,18 @@ export async function getPaymentById(id) {
   return payment;
 }
 
-export async function listMyPayments(userId) {
+export async function listMyPayments(userId, { limit = 100 } = {}) {
   // Expira de forma ociosa os PIX vencidos que ainda constam como PENDING.
   await prisma.payment.updateMany({
     where: { userId, status: 'PENDING', expiresAt: { lte: new Date() } },
     data: { status: 'EXPIRED' },
   });
-  return prisma.payment.findMany({ where: { userId }, include: paymentInclude, orderBy: { createdAt: 'desc' } });
+  return prisma.payment.findMany({
+    where: { userId },
+    include: paymentInclude,
+    orderBy: { createdAt: 'desc' },
+    take: Math.min(Math.max(Number(limit) || 100, 1), 200),
+  });
 }
 
 export async function listPayments({ status, eventId, userId, page = 1, limit = 20, search } = {}) {

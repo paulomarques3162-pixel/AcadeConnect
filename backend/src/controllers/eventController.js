@@ -7,8 +7,15 @@ import { publicUrl } from '../config/multer.js';
 import { slugify, generateRegistrationCode } from '../utils/codes.js';
 import { parseDate } from '../utils/date.js';
 import { createAuditLog } from '../services/auditLogService.js';
-import { createNotification } from '../services/notificationService.js';
+import { createNotifications } from '../services/notificationService.js';
 import { autoIssueCertificatesForEvent } from '../services/certificateService.js';
+import { cacheWrap, invalidate } from '../utils/cache.js';
+import { env } from '../config/env.js';
+
+// Public event listings/details are read constantly and change rarely: a short
+// TTL cache removes the repeated identical queries that dominate concurrent
+// traffic. Invalidated explicitly on every write.
+const EVENTS_CACHE_PREFIX = 'events:';
 
 const eventInclude = (includeStats = false) => ({
   institution: { select: { id: true, name: true } },
@@ -107,57 +114,74 @@ export const listEvents = asyncHandler(async (req, res) => {
         ? { registrations: { _count: 'desc' } }
         : { createdAt: 'desc' };
 
-  const [total, events] = await Promise.all([
-    prisma.event.count({ where }),
-    prisma.event.findMany({
-      where,
-      orderBy,
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
-      include: eventInclude(),
-    }),
-  ]);
+  // Search results are not cached (high cardinality); unfiltered listing is.
+  const runQuery = async () => {
+    const [total, events] = await Promise.all([
+      prisma.event.count({ where }),
+      prisma.event.findMany({
+        where,
+        orderBy,
+        skip: (Number(page) - 1) * Number(limit),
+        take: Number(limit),
+        include: eventInclude(),
+      }),
+    ]);
+    return {
+      events: events.map(enrichEvent),
+      meta: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        pages: Math.ceil(total / Number(limit)),
+      },
+    };
+  };
+
+  const payload = search
+    ? await runQuery()
+    : await cacheWrap(
+        `${EVENTS_CACHE_PREFIX}list:${page}:${limit}:${category || ''}:${modality || ''}:${status || ''}:${location || ''}:${date || ''}:${sort}`,
+        env.publicCacheTtlMs,
+        runQuery
+      );
 
   return apiResponse(res, {
     message: 'Eventos listados.',
-    data: { events: events.map(enrichEvent) },
-    meta: {
-      page: Number(page),
-      limit: Number(limit),
-      total,
-      pages: Math.ceil(total / Number(limit)),
-    },
+    data: { events: payload.events },
+    meta: payload.meta,
   });
 });
 
 export const getEvent = asyncHandler(async (req, res) => {
   const { idOrSlug } = req.params;
-  const event = await prisma.event.findFirst({
-    where: {
-      OR: [{ id: idOrSlug }, { slug: idOrSlug }],
-      deletedAt: null,
-    },
-    include: {
-      institution: true,
-      organizer: { select: { id: true, name: true } },
-      activities: {
-        orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
-        include: { speaker: true, _count: { select: { registrations: true, attendance: true } } },
+  const build = async () => {
+    const event = await prisma.event.findFirst({
+      where: {
+        OR: [{ id: idOrSlug }, { slug: idOrSlug }],
+        deletedAt: null,
       },
-      _count: { select: { activities: true, registrations: true, attendance: true } },
-    },
-  });
-  if (!event) throw new ApiError(404, 'Evento não encontrado.');
+      include: {
+        institution: true,
+        organizer: { select: { id: true, name: true } },
+        activities: {
+          orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+          include: { speaker: true, _count: { select: { registrations: true, attendance: true } } },
+        },
+        _count: { select: { activities: true, registrations: true, attendance: true } },
+      },
+    });
+    if (!event) throw new ApiError(404, 'Evento não encontrado.');
 
-  const totalRegistered = event._count.registrations;
-  return apiResponse(res, {
-    message: 'Evento.',
-    data: {
+    const totalRegistered = event._count.registrations;
+    return {
       ...enrichEvent(event),
       _count: { ...event._count },
       capacityProgress: event.capacity ? Math.min(100, Math.round((totalRegistered / event.capacity) * 100)) : null,
-    },
-  });
+    };
+  };
+
+  const data = await cacheWrap(`${EVENTS_CACHE_PREFIX}one:${idOrSlug}`, env.publicCacheTtlMs, build);
+  return apiResponse(res, { message: 'Evento.', data });
 });
 
 // ---------- Admin / Organizer operations ----------
@@ -220,6 +244,7 @@ export const createEvent = asyncHandler(async (req, res) => {
     include: eventInclude(),
   });
 
+  invalidate(EVENTS_CACHE_PREFIX);
   await createAuditLog({ userId: req.user.id, action: 'EVENT_CREATED', resource: 'Event', resourceId: event.id, ip: req.ip });
   return apiResponse(res, { status: 201, message: 'Evento criado com sucesso.', data: { event: enrichEvent(event) } });
 });
@@ -336,19 +361,19 @@ export const updateEvent = asyncHandler(async (req, res) => {
       where: { eventId: id, status: 'CONFIRMED' },
       select: { userId: true },
     });
-    await Promise.all(
-      registrations.map((r) =>
-        createNotification({
-          userId: r.userId,
-          type: 'EVENT',
-          title: 'Evento atualizado',
-          message: `O evento "${event.name}" foi atualizado: ${changes.join('; ')}.`,
-          link: `/eventos/${event.slug || event.id}`,
-        })
-      )
+    // One bulk INSERT for all recipients (was N individual inserts).
+    await createNotifications(
+      registrations.map((r) => r.userId),
+      {
+        type: 'EVENT',
+        title: 'Evento atualizado',
+        message: `O evento "${event.name}" foi atualizado: ${changes.join('; ')}.`,
+        link: `/eventos/${event.slug || event.id}`,
+      }
     );
   }
 
+  invalidate(EVENTS_CACHE_PREFIX);
   await createAuditLog({ userId: req.user.id, action: 'EVENT_UPDATED', resource: 'Event', resourceId: id, ip: req.ip });
   return apiResponse(res, { message: 'Evento atualizado com sucesso.', data: { event: enrichEvent(event) } });
 });
@@ -360,6 +385,7 @@ export const deleteEvent = asyncHandler(async (req, res) => {
     where: { id },
     data: { status: 'CANCELLED', deletedAt: new Date() },
   });
+  invalidate(EVENTS_CACHE_PREFIX);
   await createAuditLog({ userId: req.user.id, action: 'EVENT_DELETED', resource: 'Event', resourceId: id, ip: req.ip });
   return apiResponse(res, { message: 'Evento desativado.', data: { id: event.id } });
 });
@@ -367,6 +393,7 @@ export const deleteEvent = asyncHandler(async (req, res) => {
 export const hardDeleteEvent = asyncHandler(async (req, res) => {
   const { id } = req.params;
   await prisma.event.delete({ where: { id } });
+  invalidate(EVENTS_CACHE_PREFIX);
   await createAuditLog({ userId: req.user.id, action: 'EVENT_HARD_DELETED', resource: 'Event', resourceId: id, ip: req.ip });
   return apiResponse(res, { message: 'Evento excluído permanentemente.' });
 });
@@ -436,6 +463,7 @@ export const duplicateEvent = asyncHandler(async (req, res) => {
     },
   });
 
+  invalidate(EVENTS_CACHE_PREFIX);
   await createAuditLog({ userId: req.user.id, action: 'EVENT_DUPLICATED', resource: 'Event', resourceId: copy.id, ip: req.ip });
   return apiResponse(res, { status: 201, message: 'Evento duplicado com sucesso.', data: { event: copy } });
 });
@@ -444,6 +472,7 @@ export const closeEventAndIssueCertificates = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const event = await prisma.event.update({ where: { id }, data: { status: 'CLOSED', allowRegistration: false } });
   const result = await autoIssueCertificatesForEvent(id);
+  invalidate(EVENTS_CACHE_PREFIX);
   await createAuditLog({ userId: req.user.id, action: 'EVENT_CLOSED', resource: 'Event', resourceId: id, details: result, ip: req.ip });
   return apiResponse(res, { message: 'Evento encerrado.', data: { event, certificatesIssued: result.issued } });
 });

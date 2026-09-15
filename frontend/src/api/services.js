@@ -223,6 +223,8 @@ export const conversationApi = {
   adminList: (params) => api.get('/conversations/admin/list', { params }).then(unwrap),
   adminStart: (data) => api.post('/conversations/admin/start', data).then(unwrap),
   get: (id) => api.get(`/conversations/${id}`).then(unwrap),
+  // Incremental refresh: returns only messages newer than `since` (ISO date).
+  messagesSince: (id, since) => api.get(`/conversations/${id}/messages`, { params: { since } }).then(unwrap),
   start: (data) => api.post('/conversations', data).then(unwrap),
   send: (id, body) => api.post(`/conversations/${id}/messages`, { body }).then(unwrap),
   setStatus: (id, status) => api.post(`/conversations/${id}/status`, { status }).then(unwrap),

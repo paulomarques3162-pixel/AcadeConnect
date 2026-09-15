@@ -16,10 +16,12 @@ const certInclude = {
 };
 
 export const getMyCertificates = asyncHandler(async (req, res) => {
+  const take = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
   const certificates = await prisma.certificate.findMany({
     where: { userId: req.user.id },
     include: certInclude,
     orderBy: { issueDate: 'desc' },
+    take,
   });
   return apiResponse(res, {
     message: 'Meus certificados.',

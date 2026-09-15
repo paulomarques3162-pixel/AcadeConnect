@@ -6,6 +6,7 @@ import { Logo } from '../components/Logo';
 import { useTheme } from '../context/ThemeContext';
 import { Moon, Sun } from 'lucide-react';
 import { conversationApi } from '../api/services';
+import { subscribeRealtime, subscribeRealtimeStatus } from '../api/realtime';
 
 const LINKS = [
   { to: '/minha-area', label: 'Minha área', icon: Home },
@@ -28,14 +29,89 @@ export function DashboardLayout() {
 
   useEffect(() => {
     let active = true;
-    const load = () =>
-      conversationApi
-        .unreadCount()
-        .then((r) => active && setUnreadMsgs(r.data?.unread || 0))
-        .catch(() => {});
+    let fallbackTimer = null;
+    let requestTimer = null;
+    let lastRequestAt = 0;
+    let inFlight = false;
+
+    const clearFallback = () => {
+      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+    };
+
+    const load = async () => {
+      if (!active || inFlight) return;
+      inFlight = true;
+      try {
+        const r = await conversationApi.unreadCount();
+        if (active) {
+          setUnreadMsgs(r.data?.unread || 0);
+          lastRequestAt = Date.now();
+        }
+      } catch {
+        // keep the last known badge value
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const scheduleLoad = () => {
+      if (!active || requestTimer) return;
+      requestTimer = setTimeout(() => {
+        requestTimer = null;
+        load();
+      }, 250);
+    };
+
+    const scheduleFallback = () => {
+      clearFallback();
+      if (!active || document.hidden) return;
+      fallbackTimer = setTimeout(async () => {
+        fallbackTimer = null;
+        await load();
+        scheduleFallback();
+      }, 120000);
+    };
+
     load();
-    const timer = setInterval(load, 60000);
-    return () => { active = false; clearInterval(timer); };
+    scheduleFallback();
+
+    const unsubscribe = subscribeRealtime((evt) => {
+      // One coalesced refresh for a burst of realtime events. Message events
+      // are intentionally ignored here because a user message already emits
+      // the corresponding notification event.
+      if (active && (evt?.type === 'conversation' || evt?.type === 'notification')) {
+        scheduleLoad();
+      }
+    });
+
+    const unsubscribeStatus = subscribeRealtimeStatus((isConnected) => {
+      if (isConnected) {
+        clearFallback();
+      } else {
+        scheduleFallback();
+      }
+    });
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        clearFallback();
+        return;
+      }
+      // Only use focus/visibility as a consistency check when realtime is not
+      // connected; avoid an HTTP request every time the tab gets focus.
+      scheduleFallback();
+      if (Date.now() - lastRequestAt > 30000) scheduleLoad();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      active = false;
+      clearFallback();
+      if (requestTimer) clearTimeout(requestTimer);
+      unsubscribe();
+      unsubscribeStatus();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   const handleLogout = async () => {

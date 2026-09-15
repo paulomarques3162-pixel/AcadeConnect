@@ -14,6 +14,7 @@ router.get('/admin/list', authorize('ADMIN', 'ORGANIZER'), ctrl.adminList);
 router.post('/admin/start', authorize('ADMIN', 'ORGANIZER'), validate(conversationSchemas.adminStart), ctrl.adminStart);
 router.post('/', validate(conversationSchemas.start), ctrl.start);
 router.get('/:id', validate(conversationSchemas.idParam), ctrl.getOne);
+router.get('/:id/messages', validate(conversationSchemas.idParam), ctrl.messagesSince);
 router.post('/:id/messages', validate(conversationSchemas.message), ctrl.send);
 router.post('/:id/read', validate(conversationSchemas.idParam), ctrl.markRead);
 router.post('/:id/status', authorize('ADMIN', 'ORGANIZER'), validate(conversationSchemas.status), ctrl.setStatus);

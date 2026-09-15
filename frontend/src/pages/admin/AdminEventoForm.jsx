@@ -58,7 +58,7 @@ export default function AdminEventoForm() {
   const [banner, setBanner] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const { data, loading, error } = useApi(
+  const { data, loading, error, reload } = useApi(
     () => (isEdit ? eventApi.get(id).then((r) => r.data) : Promise.resolve(null)),
     [id],
     { immediate: isEdit }
@@ -104,7 +104,7 @@ export default function AdminEventoForm() {
   };
 
   if (loading) return <Spinner text="Carregando evento..." />;
-  if (error) return <ErrorState onRetry={() => window.location.reload()} />;
+  if (error) return <ErrorState onRetry={reload} />;
 
   return (
     <>

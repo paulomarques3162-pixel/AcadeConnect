@@ -12,6 +12,10 @@ router.get('/me', ctrl.getMyRegistrations);
 router.get('/:id', validate(registrationSchemas.idParam), ctrl.getRegistration);
 router.post('/:eventId', validate(registrationSchemas.create), ctrl.registerForEvent);
 router.delete('/:id', validate(registrationSchemas.idParam), ctrl.cancelRegistration);
+router.post('/:id/payment', validate(registrationSchemas.idParam), ctrl.generatePayment);
+
+// Controle administrativo do QR de entrada
+router.post('/:id/qr', authorize('ADMIN', 'ORGANIZER'), validate(registrationSchemas.qr), ctrl.adminSetQr);
 
 // Activity subscriptions on a registration
 router.post('/:id/activities', validate(registrationSchemas.activity), ctrl.registerForActivity);

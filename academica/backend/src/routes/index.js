@@ -9,6 +9,13 @@ import attendanceRoutes from './attendance.routes.js';
 import certificateRoutes from './certificate.routes.js';
 import notificationRoutes from './notification.routes.js';
 import adminRoutes from './admin.routes.js';
+import pixRoutes from './pix.routes.js';
+import paymentRoutes from './payments.routes.js';
+import raffleRoutes from './raffle.routes.js';
+import productRoutes from './products.routes.js';
+import couponRoutes from './coupons.routes.js';
+import orderRoutes from './orders.routes.js';
+import conversationRoutes from './conversations.routes.js';
 
 const router = Router();
 
@@ -25,6 +32,13 @@ router.use('/registrations', registrationRoutes);
 router.use('/attendance', attendanceRoutes);
 router.use('/certificates', certificateRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/pix', pixRoutes);
+router.use('/payments', paymentRoutes);
+router.use('/raffles', raffleRoutes);
+router.use('/products', productRoutes);
+router.use('/coupons', couponRoutes);
+router.use('/orders', orderRoutes);
+router.use('/conversations', conversationRoutes);
 router.use('/admin', adminRoutes);
 
 export default router;

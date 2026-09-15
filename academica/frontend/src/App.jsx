@@ -38,6 +38,19 @@ const AdminCertificados = lazy(() => import('./pages/admin/AdminCertificados'));
 const AdminRelatorios = lazy(() => import('./pages/admin/AdminRelatorios'));
 const AdminUsuarios = lazy(() => import('./pages/admin/AdminUsuarios'));
 const AdminConfiguracoes = lazy(() => import('./pages/admin/AdminConfiguracoes'));
+const AdminSorteios = lazy(() => import('./pages/admin/AdminSorteios'));
+const AdminPagamentos = lazy(() => import('./pages/admin/AdminPagamentos'));
+const AdminPix = lazy(() => import('./pages/admin/AdminPix'));
+const AdminProdutos = lazy(() => import('./pages/admin/AdminProdutos'));
+const AdminCupons = lazy(() => import('./pages/admin/AdminCupons'));
+const AdminPedidos = lazy(() => import('./pages/admin/AdminPedidos'));
+const AdminComunicacao = lazy(() => import('./pages/admin/AdminComunicacao'));
+
+const Loja = lazy(() => import('./pages/Loja'));
+const Cupons = lazy(() => import('./pages/Cupons'));
+const MeusPedidos = lazy(() => import('./pages/MeusPedidos'));
+const MeusPagamentos = lazy(() => import('./pages/MeusPagamentos'));
+const Comunicacao = lazy(() => import('./pages/Comunicacao'));
 
 function PageLoader() {
   return <div className="route-loading"><Spinner text="Carregando..." /></div>;
@@ -75,6 +88,11 @@ export default function App() {
             <Route path="/perfil" element={<Perfil />} />
             <Route path="/certificados" element={<Certificados />} />
             <Route path="/certificados/:id" element={<CertificadoDetail />} />
+            <Route path="/loja" element={<Loja />} />
+            <Route path="/cupons" element={<Cupons />} />
+            <Route path="/meus-pedidos" element={<MeusPedidos />} />
+            <Route path="/meus-pagamentos" element={<MeusPagamentos />} />
+            <Route path="/comunicacao" element={<Comunicacao />} />
           </Route>
         </Route>
 
@@ -95,6 +113,13 @@ export default function App() {
             <Route path="/admin/operador" element={<AdminOperador />} />
             <Route path="/admin/telao" element={<AdminTelao />} />
             <Route path="/admin/certificados" element={<AdminCertificados />} />
+            <Route path="/admin/sorteios" element={<AdminSorteios />} />
+            <Route path="/admin/pagamentos" element={<AdminPagamentos />} />
+            <Route path="/admin/pix" element={<AdminPix />} />
+            <Route path="/admin/produtos" element={<AdminProdutos />} />
+            <Route path="/admin/cupons" element={<AdminCupons />} />
+            <Route path="/admin/pedidos" element={<AdminPedidos />} />
+            <Route path="/admin/comunicacao" element={<AdminComunicacao />} />
             <Route path="/admin/relatorios" element={<AdminRelatorios />} />
             <Route path="/admin/usuarios" element={<AdminUsuarios />} />
             <Route path="/admin/configuracoes" element={<AdminConfiguracoes />} />

@@ -81,6 +81,8 @@ export const registrationApi = {
   cancel: (id) => api.delete(`/registrations/${id}`).then(unwrap),
   registerForActivity: (id, activityId) => api.post(`/registrations/${id}/activities`, { activityId }).then(unwrap),
   unregisterFromActivity: (id, activityId) => api.delete(`/registrations/${id}/activities/${activityId}`).then(unwrap),
+  generatePayment: (id) => api.post(`/registrations/${id}/payment`).then(unwrap),
+  adminQr: (id, action) => api.post(`/registrations/${id}/qr`, { action }).then(unwrap),
 };
 
 // ---- Attendance ----
@@ -137,6 +139,88 @@ export const adminApi = {
   logs: (params) => api.get('/admin/logs', { params }).then(unwrap),
   reports: (params) => api.get('/admin/reports', { params }).then(unwrap),
   exportUrl: '/admin/export',
+};
+
+// ---- PIX (admin) ----
+export const pixApi = {
+  list: () => api.get('/pix').then(unwrap),
+  create: (data) => api.post('/pix', data).then(unwrap),
+  update: (id, data) => api.put(`/pix/${id}`, data).then(unwrap),
+  remove: (id) => api.delete(`/pix/${id}`).then(unwrap),
+};
+
+// ---- Payments ----
+export const paymentApi = {
+  mine: () => api.get('/payments/mine').then(unwrap),
+  get: (id) => api.get(`/payments/${id}`).then(unwrap),
+  adminList: (params) => api.get('/payments/admin/list', { params }).then(unwrap),
+  confirm: (id, data = {}) => api.post(`/payments/${id}/confirm`, data).then(unwrap),
+  setStatus: (id, status) => api.post(`/payments/${id}/status`, { status }).then(unwrap),
+};
+
+// ---- Raffles (admin) ----
+export const raffleApi = {
+  list: (params) => api.get('/raffles', { params }).then(unwrap),
+  get: (id) => api.get(`/raffles/${id}`).then(unwrap),
+  eligible: (id) => api.get(`/raffles/${id}/eligible`).then(unwrap),
+  create: (data) => api.post('/raffles', data).then(unwrap),
+  draw: (id) => api.post(`/raffles/${id}/draw`).then(unwrap),
+  setStatus: (id, status) => api.post(`/raffles/${id}/status`, { status }).then(unwrap),
+};
+
+// ---- Products ----
+export const productApi = {
+  list: (params) => api.get('/products', { params }).then(unwrap),
+  get: (id) => api.get(`/products/${id}`).then(unwrap),
+  adminList: (params) => api.get('/products/admin/list', { params }).then(unwrap),
+  create: (data) => api.post('/products', data).then(unwrap),
+  createWithFile: (data, file) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(data)) fd.append(k, v ?? '');
+    if (file) fd.append('image', file);
+    return api.post('/products', fd).then(unwrap);
+  },
+  update: (id, data) => api.put(`/products/${id}`, data).then(unwrap),
+  updateWithFile: (id, data, file) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(data)) fd.append(k, v ?? '');
+    if (file) fd.append('image', file);
+    return api.put(`/products/${id}`, fd).then(unwrap);
+  },
+  remove: (id) => api.delete(`/products/${id}`).then(unwrap),
+};
+
+// ---- Coupons ----
+export const couponApi = {
+  list: (params) => api.get('/coupons', { params }).then(unwrap),
+  create: (data) => api.post('/coupons', data).then(unwrap),
+  update: (id, data) => api.put(`/coupons/${id}`, data).then(unwrap),
+  remove: (id) => api.delete(`/coupons/${id}`).then(unwrap),
+  validate: (code, subtotalCents) => api.post('/coupons/validate', { code, subtotalCents }).then(unwrap),
+  publicList: () => api.get('/coupons/public').then(unwrap),
+};
+
+// ---- Orders ----
+export const orderApi = {
+  create: (data) => api.post('/orders', data).then(unwrap),
+  mine: () => api.get('/orders/mine').then(unwrap),
+  get: (id) => api.get(`/orders/${id}`).then(unwrap),
+  pay: (id) => api.post(`/orders/${id}/pay`).then(unwrap),
+  adminList: (params) => api.get('/orders/admin/list', { params }).then(unwrap),
+  setStatus: (id, status) => api.post(`/orders/${id}/status`, { status }).then(unwrap),
+  receiptUrl: (id) => `${API_BASE_URL.replace(/\/$/, '')}/orders/${id}/receipt`,
+};
+
+// ---- Conversations ----
+export const conversationApi = {
+  admins: () => api.get('/conversations/admins').then(unwrap),
+  mine: () => api.get('/conversations/mine').then(unwrap),
+  adminList: (params) => api.get('/conversations/admin/list', { params }).then(unwrap),
+  get: (id) => api.get(`/conversations/${id}`).then(unwrap),
+  start: (data) => api.post('/conversations', data).then(unwrap),
+  send: (id, body) => api.post(`/conversations/${id}/messages`, { body }).then(unwrap),
+  setStatus: (id, status) => api.post(`/conversations/${id}/status`, { status }).then(unwrap),
+  markRead: (id) => api.post(`/conversations/${id}/read`).then(unwrap),
 };
 
 export const exportCsv = async (type, body) => {

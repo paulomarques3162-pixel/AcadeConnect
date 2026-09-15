@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Button, Spinner, ErrorState, StatusBadge, Checkbox, SmartImage } from '../components/ui';
 import { QRCodeCard } from '../components/Cards';
+import { PixCard, formatBRL } from '../components/PixCard';
 import { formatDate, formatNumber, ACTIVITY_TYPE_LABELS, MODALITY_LABELS, fullNameInitials, calendarDayKey } from '../utils/format';
 
 export default function EventDetail() {
@@ -149,6 +150,7 @@ export default function EventDetail() {
                 <div className="sidebox__row"><dt>Local</dt><dd>{event.location || '—'}</dd></div>
                 <div className="sidebox__row"><dt>Capacidade</dt><dd>{event.capacity ? formatNumber(event.capacity) : 'Ilimitada'}</dd></div>
                 <div className="sidebox__row"><dt>Atividades</dt><dd>{event._count?.activities ?? 0}</dd></div>
+                <div className="sidebox__row"><dt>Pagamento</dt><dd>{event.isPaid ? `PIX · ${formatBRL(event.priceCents)}` : 'Gratuito'}</dd></div>
               </dl>
 
               <div className="sidebox__actions">
@@ -157,7 +159,15 @@ export default function EventDetail() {
                     <CheckCircle2 size={40} color="var(--success)" />
                     <strong>Inscrição realizada com sucesso!</strong>
                     <span>Inscrição #{confirmation.registration.code}</span>
-                    <QRCodeCard value={confirmation.registration?.qrToken} label="Apresente este QR Code no evento" />
+                    {confirmation.requiresPayment ? (
+                      <>
+                        <span className="text-muted">Pagamento pendente. O QR Code de entrada será liberado após a confirmação da organização.</span>
+                        {confirmation.payment && <PixCard payment={confirmation.payment} title="Pagamento da inscrição" />}
+                        {confirmation.paymentWarning && <span className="text-muted">{confirmation.paymentWarning}</span>}
+                      </>
+                    ) : (
+                      <QRCodeCard value={confirmation.registration?.qrToken} label="Apresente este QR Code no evento" />
+                    )}
                     <Link className="btn btn--primary btn--block" to={`/inscricao/${confirmation.registration.id}`}>Ver minha inscrição</Link>
                   </div>
                 ) : canRegister ? (

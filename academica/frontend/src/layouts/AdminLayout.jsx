@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, CalendarDays, ListChecks, Users, Ticket, ClipboardCheck,
   Award, BarChart3, UserCog, Settings, LogOut, ScanLine, Menu, X, Moon, Sun,
+  Trophy, CreditCard, QrCode, Package, Tag, ShoppingBag, MessagesSquare,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -17,6 +18,13 @@ const MENU = [
   { to: '/admin/presencas', label: 'Presenças', icon: ClipboardCheck },
   { to: '/admin/operador', label: 'Controle de presença', icon: ScanLine },
   { to: '/admin/certificados', label: 'Certificados', icon: Award },
+  { to: '/admin/sorteios', label: 'Sorteios', icon: Trophy },
+  { to: '/admin/pagamentos', label: 'Pagamentos', icon: CreditCard },
+  { to: '/admin/pix', label: 'PIX', icon: QrCode },
+  { to: '/admin/produtos', label: 'Produtos', icon: Package },
+  { to: '/admin/cupons', label: 'Cupons', icon: Tag },
+  { to: '/admin/pedidos', label: 'Pedidos', icon: ShoppingBag },
+  { to: '/admin/comunicacao', label: 'Comunicação', icon: MessagesSquare },
   { to: '/admin/relatorios', label: 'Relatórios', icon: BarChart3 },
   { to: '/admin/usuarios', label: 'Usuários', icon: UserCog },
   { to: '/admin/configuracoes', label: 'Configurações', icon: Settings },

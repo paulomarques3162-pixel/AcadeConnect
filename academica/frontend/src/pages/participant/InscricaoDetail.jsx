@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { QrCode, Download, Award, Plus, X } from 'lucide-react';
+import { QrCode, Download, Award, Plus, X, CreditCard } from 'lucide-react';
 import { registrationApi, certificateApi, eventApi } from '../../api/services';
 import { getErrorMessage } from '../../api/client';
 import { useApi } from '../../hooks/useApi';
@@ -9,6 +9,7 @@ import { useToast } from '../../context/ToastContext';
 import { Button, StatusBadge, Spinner, ErrorState } from '../../components/ui';
 import { Modal } from '../../components/Overlay';
 import { QRCodeCard } from '../../components/Cards';
+import { PixCard } from '../../components/PixCard';
 import { formatDateTime, formatNumber, ACTIVITY_TYPE_LABELS, fullNameInitials } from '../../utils/format';
 
 export default function InscricaoDetail() {
@@ -18,6 +19,7 @@ export default function InscricaoDetail() {
   const [showQr, setShowQr] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [busyActivity, setBusyActivity] = useState(null);
+  const [busyPayment, setBusyPayment] = useState(false);
   const { data, loading, error, reload } = useApi(() => registrationApi.get(id).then((r) => r.data), [id]);
   const cert = data?.registration?.certificates?.[0];
 
@@ -56,6 +58,19 @@ export default function InscricaoDetail() {
     }
   };
 
+  const generatePayment = async () => {
+    setBusyPayment(true);
+    try {
+      await registrationApi.generatePayment(id);
+      toast.success('PIX gerado. Após pagar, aguarde a confirmação.');
+      reload();
+    } catch (e) {
+      toast.error(getErrorMessage(e, 'Não foi possível gerar o PIX.'));
+    } finally {
+      setBusyPayment(false);
+    }
+  };
+
   const handleDownloadPdf = async () => {
     if (!cert) return;
     setDownloading(true);
@@ -74,6 +89,9 @@ export default function InscricaoDetail() {
   if (loading) return <Spinner text="Carregando inscrição..." />;
   if (error || !data) return <ErrorState title="Inscrição não encontrada." onRetry={reload} />;
   const { registration } = data;
+  const payment = registration.payment;
+  const isPaidEvent = !!registration.event?.isPaid;
+  const qrAllowed = !isPaidEvent || payment?.status === 'PAID';
   const enrolledIds = new Set((registration.activityRegistrations || []).map((ar) => ar.activityId));
   const canManageActivities = registration.status === 'CONFIRMED' && registration.event?.allowRegistration !== false;
   const availableActivities = (eventActivities.data || []).filter((a) => !enrolledIds.has(a.id) && a.allowsRegistration);
@@ -103,8 +121,35 @@ export default function InscricaoDetail() {
           <div className="sidebox__row"><dt>Atividades</dt><dd>{(registration.activityRegistrations || []).length}</dd></div>
           <div className="sidebox__row"><dt>Presenças</dt><dd>{(registration.attendance || []).filter((a) => a.status === 'PRESENT').length}</dd></div>
 
-          <Button className="btn--block mt-2" onClick={() => setShowQr(true)} icon={<QrCode size={18} />}>Exibir QR Code</Button>
+          {registration.qrActive === false && isPaidEvent && payment?.status !== 'PAID' && (
+            <p className="text-muted mt-2" style={{ fontSize: '0.82rem' }}>Este QR Code está temporariamente bloqueado.</p>
+          )}
+          {qrAllowed && registration.qrActive !== false ? (
+            <Button className="btn--block mt-2" onClick={() => setShowQr(true)} icon={<QrCode size={18} />}>Exibir QR Code</Button>
+          ) : (
+            <Button className="btn--block mt-2" disabled icon={<QrCode size={18} />}>QR liberado após o pagamento</Button>
+          )}
         </div>
+
+        {isPaidEvent && (
+          <div className="card card-pad">
+            <h3 className="mb-2"><CreditCard size={18} /> Pagamento</h3>
+            {payment ? (
+              payment.status === 'PAID' ? (
+                <div className="flex" style={{ color: 'var(--success)' }}>
+                  <strong>Pagamento confirmado. QR Code de entrada liberado.</strong>
+                </div>
+              ) : (
+                <PixCard payment={payment} title="PIX da inscrição" />
+              )
+            ) : (
+              <>
+                <p className="text-muted" style={{ marginTop: 0 }}>Este é um evento pago. Gere o PIX para efetuar o pagamento.</p>
+                <Button loading={busyPayment} onClick={generatePayment} icon={<CreditCard size={16} />}>Gerar PIX</Button>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="card card-pad">
           <h3 className="mb-2">Atividades selecionadas</h3>

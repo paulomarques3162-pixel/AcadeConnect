@@ -12,7 +12,7 @@ const empty = {
   capacity: '', registrationStart: '', registrationEnd: '', status: 'DRAFT',
   allowRegistration: true, allowCancellation: true, requireActivityRegistration: false,
   requireAttendance: true, automaticCertificate: false, minimumAttendancePercentage: 75,
-  certificateHours: 8,
+  certificateHours: 8, isPaid: false, price: '', minPrice: '', maxPrice: '',
 };
 
 // Pick only the editable scalar fields. Spreading the whole GET payload used to
@@ -42,6 +42,10 @@ function toForm(event) {
     automaticCertificate: event.automaticCertificate ?? false,
     minimumAttendancePercentage: event.minimumAttendancePercentage ?? 75,
     certificateHours: event.certificateHours ?? 8,
+    isPaid: event.isPaid ?? false,
+    price: event.priceCents != null ? (event.priceCents / 100).toString() : '',
+    minPrice: event.minPriceCents != null ? (event.minPriceCents / 100).toString() : '',
+    maxPrice: event.maxPriceCents != null ? (event.maxPriceCents / 100).toString() : '',
   };
 }
 
@@ -78,6 +82,10 @@ export default function AdminEventoForm() {
       registrationEnd: form.registrationEnd || null,
       certificateHours: form.certificateHours === '' ? null : Number(form.certificateHours),
       minimumAttendancePercentage: form.minimumAttendancePercentage === '' ? null : Number(form.minimumAttendancePercentage),
+      isPaid: form.isPaid,
+      priceCents: form.price === '' ? null : Math.round(Number(form.price) * 100),
+      minPriceCents: form.minPrice === '' ? null : Math.round(Number(form.minPrice) * 100),
+      maxPriceCents: form.maxPrice === '' ? null : Math.round(Number(form.maxPrice) * 100),
     };
     try {
       if (isEdit) {
@@ -168,6 +176,20 @@ export default function AdminEventoForm() {
             <Checkbox label="Exigir inscrição em atividades" checked={form.requireActivityRegistration} onChange={setBool('requireActivityRegistration')} />
             <Checkbox label="Exigir presença" checked={form.requireAttendance} onChange={setBool('requireAttendance')} />
           </div>
+        </Card>
+
+        <Card className="card-pad mb-3">
+          <h3 style={{ marginBottom: 16 }}>Pagamento</h3>
+          <div className="flex flex-wrap mb-2" style={{ gap: 20 }}>
+            <Checkbox label="Evento pago (exige pagamento PIX para liberar o QR de entrada)" checked={form.isPaid} onChange={setBool('isPaid')} />
+          </div>
+          {form.isPaid && (
+            <div className="form-grid form-grid--3">
+              <Field label="Valor (R$)" required><Input type="number" min="0" step="0.01" value={form.price} onChange={set('price')} /></Field>
+              <Field label="Valor mínimo (R$)"><Input type="number" min="0" step="0.01" value={form.minPrice} onChange={set('minPrice')} /></Field>
+              <Field label="Valor máximo (R$)"><Input type="number" min="0" step="0.01" value={form.maxPrice} onChange={set('maxPrice')} /></Field>
+            </div>
+          )}
         </Card>
 
         <Card className="card-pad mb-3">

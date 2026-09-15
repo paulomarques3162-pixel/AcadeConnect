@@ -1,0 +1,108 @@
+import { useEffect, useState } from 'react';
+import { Send, CheckCircle2, RotateCcw } from 'lucide-react';
+import { conversationApi } from '../../api/services';
+import { useApi } from '../../hooks/useApi';
+import { useToast } from '../../context/ToastContext';
+import { Button, Input, Card, StatusBadge, Spinner, ErrorState, EmptyState } from '../../components/ui';
+import { getErrorMessage } from '../../api/client';
+import { formatDateTime } from '../../utils/format';
+import { useAuth } from '../../context/AuthContext';
+
+export default function AdminComunicacao() {
+  const toast = useToast();
+  const { user } = useAuth();
+  const [selectedId, setSelectedId] = useState(null);
+  const [reply, setReply] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const list = useApi(() => conversationApi.adminList().then((r) => r.data.conversations), []);
+  const detail = useApi(() => (selectedId ? conversationApi.get(selectedId).then((r) => r.data.conversation) : Promise.resolve(null)), [selectedId]);
+
+  useEffect(() => {
+    if (selectedId) conversationApi.markRead(selectedId).catch(() => {});
+  }, [selectedId]);
+
+  const send = async (e) => {
+    e.preventDefault();
+    if (!reply.trim()) return;
+    setSending(true);
+    try {
+      await conversationApi.send(selectedId, reply.trim());
+      setReply('');
+      detail.reload();
+      list.reload();
+    } catch (err) { toast.error(getErrorMessage(err)); }
+    finally { setSending(false); }
+  };
+
+  const setStatus = async (status) => {
+    try { await conversationApi.setStatus(selectedId, status); toast.success(status === 'RESOLVED' ? 'Conversa resolvida.' : 'Conversa reaberta.'); detail.reload(); list.reload(); }
+    catch (e) { toast.error(getErrorMessage(e)); }
+  };
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h1>Comunicação</h1>
+          <p>Converse com os participantes.</p>
+        </div>
+      </div>
+
+      <div className="grid" style={{ gridTemplateColumns: 'minmax(240px,320px) 1fr' }}>
+        <div className="list">
+          {list.loading && <Spinner text="Carregando..." />}
+          {list.error && <ErrorState onRetry={list.reload} />}
+          {!list.loading && (list.data || []).length === 0 && <EmptyState title="Nenhuma conversa." />}
+          {(list.data || []).map((c) => (
+            <Card className="card-pad" key={c.id} style={{ cursor: 'pointer', borderColor: selectedId === c.id ? 'var(--brand)' : undefined }} onClick={() => setSelectedId(c.id)}>
+              <div className="flex-between mb-1">
+                <strong>{c.user?.name}</strong>
+                <StatusBadge status={c.status} label={c.status === 'OPEN' ? 'Aberta' : 'Resolvida'} tone={c.status === 'OPEN' ? 'success' : 'neutral'} />
+              </div>
+              <p className="text-muted" style={{ margin: 0, fontSize: '0.82rem' }}>{c.subject || 'Sem assunto'} · {c._count?.messages || 0} mensagem(ns)</p>
+              <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '0.75rem' }}>{formatDateTime(c.lastMessageAt)}</p>
+            </Card>
+          ))}
+        </div>
+
+        <div>
+          {!selectedId && <p className="text-muted">Selecione uma conversa.</p>}
+          {selectedId && detail.data && (
+            <Card className="card-pad">
+              <div className="flex-between mb-2">
+                <div>
+                  <strong>{detail.data.user?.name}</strong>
+                  <p className="text-muted" style={{ margin: 0, fontSize: '0.82rem' }}>{detail.data.subject || 'Sem assunto'}</p>
+                </div>
+                {detail.data.status === 'OPEN' ? (
+                  <Button size="sm" variant="secondary" onClick={() => setStatus('RESOLVED')} icon={<CheckCircle2 size={15} />}>Resolver</Button>
+                ) : (
+                  <Button size="sm" variant="secondary" onClick={() => setStatus('OPEN')} icon={<RotateCcw size={15} />}>Reabrir</Button>
+                )}
+              </div>
+
+              <div className="chat-thread mb-2">
+                {(detail.data.messages || []).map((m) => (
+                  <div key={m.id} className={`chat-bubble ${m.senderId === user?.id ? 'chat-bubble--mine' : ''}`}>
+                    <div>{m.body}</div>
+                    <div className="chat-bubble__meta">{m.sender?.name} · {formatDateTime(m.createdAt)}</div>
+                  </div>
+                ))}
+              </div>
+
+              {detail.data.status === 'OPEN' ? (
+                <form onSubmit={send} className="flex">
+                  <Input value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Escreva uma resposta..." />
+                  <Button type="submit" loading={sending} icon={<Send size={16} />}>Enviar</Button>
+                </form>
+              ) : (
+                <p className="text-muted">Conversa resolvida. Reabra para responder.</p>
+              )}
+            </Card>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}

@@ -76,6 +76,11 @@ export const eventSchemas = {
       automaticCertificate: Joi.boolean().default(false),
       minimumAttendancePercentage: orEmpty(Joi.number().min(0).max(100)).default(75),
       certificateHours: orEmpty(Joi.number().min(0)).default(8),
+      // Evento pago (valores em centavos)
+      isPaid: Joi.boolean().default(false),
+      priceCents: orEmpty(Joi.number().integer().min(0)),
+      minPriceCents: orEmpty(Joi.number().integer().min(0)),
+      maxPriceCents: orEmpty(Joi.number().integer().min(0)),
       institutionId: Joi.string().allow('', null),
       organizerId: Joi.string().allow('', null),
     }),
@@ -145,6 +150,10 @@ export const registrationSchemas = {
     body: Joi.object({ activityId: Joi.string().required() }),
   },
   idParam: { params: Joi.object({ id: Joi.string().required() }) },
+  qr: {
+    params: Joi.object({ id: Joi.string().required() }),
+    body: Joi.object({ action: Joi.string().valid('regenerate', 'invalidate', 'reactivate').required() }),
+  },
 };
 
 export const attendanceSchemas = {

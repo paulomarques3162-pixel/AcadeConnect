@@ -6,6 +6,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { publicUrl } from '../config/multer.js';
 import { createAuditLog } from '../services/auditLogService.js';
 import { createNotification } from '../services/notificationService.js';
+import { invalidateUserCache } from '../middlewares/auth.js';
 
 const select = {
   id: true, name: true, email: true, role: true, phone: true, course: true,
@@ -31,6 +32,9 @@ export const updateProfile = asyncHandler(async (req, res) => {
   if (avatarFile) data.avatarUrl = avatarFile;
 
   const user = await prisma.user.update({ where: { id: req.user.id }, data, select });
+  // /auth/me now serves the cached authenticated user, so a profile change must
+  // drop that cache entry to be visible on the next request.
+  invalidateUserCache(req.user.id);
   if (user.avatarUrl) user.avatarUrl = publicUrl(user.avatarUrl);
 
   await createAuditLog({ userId: req.user.id, action: 'PROFILE_UPDATED', resource: 'User', resourceId: req.user.id });
@@ -59,6 +63,7 @@ export const requestAccountDeletion = asyncHandler(async (req, res) => {
       deletedAt: new Date(),
     },
   });
+  invalidateUserCache(userId);
 
   await createAuditLog({ userId, action: 'ACCOUNT_DELETED', resource: 'User', resourceId: userId });
   return apiResponse(res, { message: 'Sua conta foi excluída. Obrigado por participar.' });

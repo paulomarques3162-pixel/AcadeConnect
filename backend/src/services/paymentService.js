@@ -133,12 +133,26 @@ export async function getPaymentById(id) {
   return payment;
 }
 
-export async function listMyPayments(userId, { limit = 100 } = {}) {
-  // Expira de forma ociosa os PIX vencidos que ainda constam como PENDING.
+// Lazy PIX expiry used to run on EVERY read of /payments/mine, turning a read
+// endpoint into a write (row locks + WAL) under concurrency. Sweep at most once
+// per interval per process; a stale PENDING payment self-corrects on the next
+// read and getPaymentById still expires the exact payment it opens.
+let lastExpireSweepAt = 0;
+const EXPIRE_SWEEP_INTERVAL_MS = Math.max(5_000, Number(process.env.PAYMENT_EXPIRE_SWEEP_MS || 60_000));
+
+async function expireStalePendingPayments(userId) {
+  const now = Date.now();
+  if (now - lastExpireSweepAt < EXPIRE_SWEEP_INTERVAL_MS) return;
+  lastExpireSweepAt = now;
   await prisma.payment.updateMany({
     where: { userId, status: 'PENDING', expiresAt: { lte: new Date() } },
     data: { status: 'EXPIRED' },
   });
+}
+
+export async function listMyPayments(userId, { limit = 100 } = {}) {
+  // Expira de forma ociosa (throttled) os PIX vencidos que ainda constam PENDING.
+  await expireStalePendingPayments(userId);
   return prisma.payment.findMany({
     where: { userId },
     include: paymentInclude,

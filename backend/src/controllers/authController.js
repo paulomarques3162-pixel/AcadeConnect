@@ -10,6 +10,7 @@ import { createAuditLog } from '../services/auditLogService.js';
 import { createNotification } from '../services/notificationService.js';
 import { sendEmail, emailTemplates } from '../services/emailService.js';
 import { publicUrl } from '../config/multer.js';
+import { toPublicUser } from '../middlewares/auth.js';
 
 const publicUserSelect = {
   id: true, name: true, email: true, role: true, phone: true,
@@ -129,8 +130,11 @@ export const logout = asyncHandler(async (req, res) => {
 });
 
 export const me = asyncHandler(async (req, res) => {
-  const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: publicUserSelect });
-  if (user?.avatarUrl) user.avatarUrl = publicUrl(user.avatarUrl);
+  // V9.5 — `authenticate` already loaded the full public projection (cached for
+  // AUTH_USER_CACHE_MS and invalidated on profile/role writes), so we serve it
+  // directly instead of running a second findUnique on every request.
+  const user = toPublicUser(req.user);
+  if (user.avatarUrl) user.avatarUrl = publicUrl(user.avatarUrl);
   return apiResponse(res, { message: 'Dados do usuário.', data: { user } });
 });
 

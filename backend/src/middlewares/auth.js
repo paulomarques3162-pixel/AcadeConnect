@@ -5,15 +5,35 @@ import { ApiError } from '../utils/apiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { cacheWrap, invalidate } from '../utils/cache.js';
 
+// V9.5 — full public profile, not just the authorization fields.
+//
+// The authenticated user is already loaded (and briefly cached) on every
+// protected request. Before, GET /auth/me issued a SECOND findUnique with a
+// wider projection, so the most-hit authenticated read paid two DB round-trips.
+// Loading the public profile once here lets /auth/me answer from `req.user`
+// with zero extra queries; `authorize` only ever needs `role`, so nothing in
+// the authorization path becomes heavier.
 const USER_SELECT = {
   id: true,
   name: true,
   email: true,
   role: true,
+  phone: true,
+  course: true,
+  city: true,
+  state: true,
   avatarUrl: true,
   institutionId: true,
+  emailVerified: true,
+  createdAt: true,
   deletedAt: true,
 };
+
+/** Public projection served by /auth/me (drops the internal deletedAt flag). */
+export function toPublicUser(user) {
+  const { deletedAt, ...publicUser } = user;
+  return publicUser;
+}
 
 // The authenticated user is looked up on EVERY protected request. That is one
 // indexed query per request; under concurrency it doubles the DB load for no

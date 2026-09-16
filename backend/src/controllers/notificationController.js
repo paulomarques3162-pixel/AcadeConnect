@@ -6,7 +6,9 @@ import { parsePagination, paginationMeta } from '../utils/pagination.js';
 
 export const listMyNotifications = asyncHandler(async (req, res) => {
   const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 100 });
-  const [total, notifications] = await Promise.all([
+  // All three reads are independent — run them in parallel instead of awaiting
+  // the unread count after the page query (one extra serial round-trip).
+  const [total, notifications, unread] = await Promise.all([
     prisma.notification.count({ where: { userId: req.user.id } }),
     prisma.notification.findMany({
       where: { userId: req.user.id },
@@ -14,8 +16,8 @@ export const listMyNotifications = asyncHandler(async (req, res) => {
       skip,
       take,
     }),
+    prisma.notification.count({ where: { userId: req.user.id, read: false } }),
   ]);
-  const unread = await prisma.notification.count({ where: { userId: req.user.id, read: false } });
   return apiResponse(res, {
     message: 'Notificações.',
     data: { notifications, unread },

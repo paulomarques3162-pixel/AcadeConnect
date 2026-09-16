@@ -5,7 +5,11 @@ import { upload } from '../config/multer.js';
 import { activitySchemas } from '../validations/schemas.js';
 import * as ctrl from '../controllers/activityController.js';
 
-const router = Router();
+// `mergeParams` is REQUIRED: this router is mounted both at /activities and
+// nested at /events/:eventId/activities. Without it the parent `:eventId` was
+// invisible to the handler and the nested route silently returned every
+// activity of every event instead of the event's schedule.
+const router = Router({ mergeParams: true });
 
 // Public: list (by query eventId or nested /:eventId/activities) and get by id
 router.get('/', ctrl.listActivities);

@@ -48,6 +48,22 @@ const registrationInclude = {
   payment: { select: { id: true, code: true, status: true, amountCents: true, pixPayload: true, txid: true, paidAt: true, expiresAt: true } },
 };
 
+// Lean projection for the "my registrations" LIST (V9.5).
+//
+// The list screens (MinhaArea, MinhasInscricoes, EventDetail) only read: the
+// registration status/code/eventId, the event name/dates/allowCancellation and
+// the activity + attendance roll-ups used by the dashboard. They never read the
+// event institution, the payment/PIX, the certificates or the speaker — so the
+// LIST drops those joins while the DETAIL route keeps `registrationInclude`.
+// This cuts both the query work and the serialized payload on a hot path.
+const registrationListInclude = {
+  event: { select: { id: true, name: true, startDate: true, endDate: true, allowCancellation: true } },
+  activityRegistrations: {
+    select: { activity: { select: { id: true, name: true, date: true, startTime: true, location: true } } },
+  },
+  attendance: { select: { status: true } },
+};
+
 export const registerForEvent = asyncHandler(async (req, res) => {
   const { eventId } = req.params;
   const activityIds = req.body.activityIds || [];
@@ -209,7 +225,7 @@ export const getMyRegistrations = asyncHandler(async (req, res) => {
   const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 200);
   const registrations = await prisma.registration.findMany({
     where: { userId: req.user.id },
-    include: registrationInclude,
+    include: registrationListInclude,
     orderBy: { createdAt: 'desc' },
     take,
   });

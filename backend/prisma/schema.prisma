@@ -287,6 +287,7 @@ model Activity {
 
   @@index([eventId])
   @@index([date])
+@@index([date, startTime])
 @@index([eventId, date])
 @@index([eventId, status])
 }

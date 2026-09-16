@@ -16,11 +16,20 @@ const certInclude = {
   user: { select: { id: true, name: true, email: true } },
 };
 
+// Lean projection for the "my certificates" LIST. The card renders event name,
+// activity name, code, hours and status — it does not need the institution, the
+// participant relation (it IS the requester) nor the registration. The detail
+// route keeps the full `certInclude`.
+const certListInclude = {
+  event: { select: { id: true, name: true } },
+  activity: { select: { id: true, name: true } },
+};
+
 export const getMyCertificates = asyncHandler(async (req, res) => {
   const take = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
   const certificates = await prisma.certificate.findMany({
     where: { userId: req.user.id },
-    include: certInclude,
+    include: certListInclude,
     orderBy: { issueDate: 'desc' },
     take,
   });

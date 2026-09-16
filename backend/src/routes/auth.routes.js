@@ -7,10 +7,16 @@ import * as ctrl from '../controllers/authController.js';
 
 const router = Router();
 
-// authPeakLimiter = coarse per-IP flood ceiling; authLimiter = per (IP+email)
-// brute-force ceiling that only counts FAILED attempts.
+// authPeakLimiter = coarse per-IP flood ceiling (counts only failures, so a
+// legitimate login wave behind one campus NAT is never throttled).
+// authLimiter = per (IP+email) ceiling for routes with no credential check.
+//
+// /login deliberately does NOT use authLimiter: that middleware blocks on entry,
+// so once the (IP+email) budget filled up it rejected even a CORRECT password.
+// The controller now verifies credentials first and applies the failure budget
+// afterwards (`utils/loginAttempts.js`), and authPeakLimiter still caps floods.
 router.post('/register', authPeakLimiter, authLimiter, validate(authSchemas.register), ctrl.register);
-router.post('/login', authPeakLimiter, authLimiter, validate(authSchemas.login), ctrl.login);
+router.post('/login', authPeakLimiter, validate(authSchemas.login), ctrl.login);
 router.post('/logout', authenticate, ctrl.logout);
 router.get('/me', authenticate, ctrl.me);
 router.post('/forgot-password', authLimiter, validate(authSchemas.forgot), ctrl.forgotPassword);

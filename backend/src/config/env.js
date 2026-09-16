@@ -37,10 +37,13 @@ export const env = {
   // Anonymous requests share a public IP (whole campus/NAT), so the IP ceiling
   // must be much higher than the per-session ceiling.
   rateLimitAnonMax: Number(process.env.RATE_LIMIT_ANON_MAX || 3000),
-  // Failed login attempts allowed per (IP + e-mail) in 15 min. Successful
-  // logins are never counted, so a whole class can sign in simultaneously.
+  // Failed login attempts before a (IP + e-mail) identity is locked. Applied
+  // AFTER credential verification (V9.5), so a correct password is never
+  // rejected because of earlier failures.
   authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 10),
-  // Coarse per-IP ceiling for the auth routes (absorbs legitimate login waves).
+  authFailureWindowMs: Number(process.env.AUTH_FAILURE_WINDOW_MS || 15 * 60 * 1000),
+  // Coarse per-IP ceiling for the auth routes. Only FAILED requests count, so a
+  // 500-user simultaneous login wave behind one campus NAT is not throttled.
   authPeakLimitMax: Number(process.env.AUTH_PEAK_LIMIT_MAX || 600),
   heavyRateLimitMax: Number(process.env.HEAVY_RATE_LIMIT_MAX || 60),
   streamRateLimitMax: Number(process.env.STREAM_RATE_LIMIT_MAX || 20),

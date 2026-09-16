@@ -5,6 +5,7 @@ import { ApiError } from '../utils/apiError.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { signToken } from '../utils/jwt.js';
+import { loginIdentityKey, noteLoginFailure, clearLoginFailures } from '../utils/loginAttempts.js';
 import { createAuditLog } from '../services/auditLogService.js';
 import { createNotification } from '../services/notificationService.js';
 import { sendEmail, emailTemplates } from '../services/emailService.js';
@@ -79,14 +80,30 @@ export const register = asyncHandler(async (req, res) => {
 export const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   const normalizedEmail = String(email).toLowerCase().trim();
+  const failureKey = loginIdentityKey(req);
 
   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
   // Always run a comparison even when the user does not exist, so response time
   // does not reveal whether an email is registered (user enumeration timing).
   const storedHash = user?.passwordHash || '$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidinv';
   const valid = await verifyPassword(password, storedHash);
-  if (!user || user.deletedAt || !valid) throw new ApiError(401, 'Credenciais inválidas.');
 
+  if (!user || user.deletedAt || !valid) {
+    // V9.5 — Credentials are verified BEFORE the failure budget is applied, so a
+    // CORRECT password is never rejected because of previous failed attempts.
+    // Only failures consume the budget; once it is exhausted further FAILED
+    // attempts receive 429 + Retry-After. (The old `authLimiter` counted on
+    // entry, so it locked valid users out for 15 min after 10 typos.)
+    const state = noteLoginFailure(failureKey);
+    if (state.blocked) {
+      res.setHeader('Retry-After', String(state.retryAfter));
+      throw new ApiError(429, 'Muitas tentativas de login. Aguarde alguns minutos.');
+    }
+    throw new ApiError(401, 'Credenciais inválidas.');
+  }
+
+  // Successful authentication resets the brute-force budget for this identity.
+  clearLoginFailures(failureKey);
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
   const token = signToken({ sub: user.id });

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Trophy, Users, Wand2 } from 'lucide-react';
+import { Plus, Trophy, Users, Wand2, Sparkles, CalendarDays, UserCheck, Medal } from 'lucide-react';
 import { raffleApi, eventApi } from '../../api/services';
 import { useApi } from '../../hooks/useApi';
 import { useToast } from '../../context/ToastContext';
@@ -8,6 +8,7 @@ import { Button, Field, Input, Select, Checkbox, Card, StatusBadge, Spinner, Err
 import { Modal } from '../../components/Overlay';
 import { formatDateTime, formatNumber } from '../../utils/format';
 import { getErrorMessage } from '../../api/client';
+import '../../styles/sorteio.css';
 
 const RAFFLE_LABELS = { OPEN: 'Aberto', CLOSED: 'Encerrado', CANCELLED: 'Cancelado' };
 
@@ -20,6 +21,9 @@ export default function AdminSorteios() {
   const [selectedId, setSelectedId] = useState(null);
   const [spinKey, setSpinKey] = useState(0);
   const [targetIndex, setTargetIndex] = useState(null);
+  // V9.5: o vencedor só é revelado DEPOIS da animação terminar.
+  const [phase, setPhase] = useState('idle'); // idle | spinning | done
+  const [pendingWinner, setPendingWinner] = useState(null);
   const [winner, setWinner] = useState(null);
   const [drawing, setDrawing] = useState(false);
 
@@ -27,6 +31,18 @@ export default function AdminSorteios() {
   const raffles = useApi(() => raffleApi.list({ eventId }).then((r) => r.data.raffles), [eventId]);
   const detail = useApi(() => (selectedId ? raffleApi.get(selectedId).then((r) => r.data.raffle) : Promise.resolve(null)), [selectedId]);
   const elig = useApi(() => (selectedId ? raffleApi.eligible(selectedId).then((r) => r.data) : Promise.resolve(null)), [selectedId]);
+
+  const resetDraw = () => {
+    setWinner(null);
+    setPendingWinner(null);
+    setPhase('idle');
+    setTargetIndex(null);
+  };
+
+  const selectRaffle = (id) => {
+    setSelectedId(id);
+    resetDraw();
+  };
 
   const create = async (e) => {
     e.preventDefault();
@@ -46,17 +62,17 @@ export default function AdminSorteios() {
   };
 
   const doDraw = async () => {
-    if (!selectedId) return;
+    if (!selectedId || drawing || phase === 'spinning') return;
     setDrawing(true);
-    setWinner(null);
+    resetDraw();
     try {
       const res = await raffleApi.draw(selectedId);
       const list = elig.data?.eligible || [];
       const idx = list.findIndex((x) => x.userId === res.data.winner.userId);
       setTargetIndex(idx >= 0 ? idx : 0);
-      setWinner(res.data.winner);
+      setPendingWinner(res.data.winner);
+      setPhase('spinning');
       setSpinKey((k) => k + 1);
-      toast.success('Vencedor sorteado!');
       detail.reload();
       elig.reload();
       raffles.reload();
@@ -65,6 +81,12 @@ export default function AdminSorteios() {
     } finally {
       setDrawing(false);
     }
+  };
+
+  // Chamado pela roleta quando a animação termina (ou pelo fallback interno).
+  const revealWinner = () => {
+    setWinner((current) => current || pendingWinner);
+    setPhase((p) => (p === 'spinning' ? 'done' : p));
   };
 
   const closeRaffle = async (id) => {
@@ -79,9 +101,13 @@ export default function AdminSorteios() {
   };
 
   const eligibleNames = elig.data?.eligible?.map((e) => e.name) || [];
+  const raffle = detail.data;
+  const winnerCount = raffle?.winners?.length || 0;
+  const eligibleCount = elig.data?.eligibleCount || 0;
+  const busy = drawing || phase === 'spinning';
 
   return (
-    <>
+    <div className="raffle">
       <div className="page-head">
         <div>
           <h1>Sorteios</h1>
@@ -92,9 +118,25 @@ export default function AdminSorteios() {
         </Button>
       </div>
 
-      <div className="filters mb-3" style={{ maxWidth: 420 }}>
+      {/* 1. Cabeçalho do sorteio */}
+      <header className="raffle-hero">
+        <span className="raffle-hero__eyebrow"><Sparkles size={14} /> Sorteio oficial · Mustangs Atlética</span>
+        <h2 className="raffle-hero__title">{raffle ? raffle.prize : 'Mesa de sorteio'}</h2>
+        <p className="raffle-hero__event">
+          <CalendarDays size={15} />
+          {raffle?.event?.name || 'Selecione um evento e um sorteio para começar'}
+        </p>
+        <div className="raffle-hero__badges">
+          {raffle && <span className="raffle-chip raffle-chip--gold"><Trophy size={14} /> {RAFFLE_LABELS[raffle.status] || raffle.status}</span>}
+          {raffle && <span className="raffle-chip"><UserCheck size={14} /> {formatNumber(eligibleCount)} elegíveis</span>}
+          {raffle && <span className="raffle-chip"><Medal size={14} /> {formatNumber(winnerCount)} vencedor(es)</span>}
+          {raffle && !raffle.allowRepeat && <span className="raffle-chip">Sem repetição</span>}
+        </div>
+      </header>
+
+      <div className="filters" style={{ maxWidth: 460 }}>
         <Field label="Evento">
-          <Select value={eventId} onChange={(e) => { setEventId(e.target.value); setSelectedId(null); setWinner(null); }}>
+          <Select value={eventId} onChange={(e) => { setEventId(e.target.value); setSelectedId(null); resetDraw(); }}>
             <option value="">Selecione um evento</option>
             {(events.data || []).map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
           </Select>
@@ -105,68 +147,120 @@ export default function AdminSorteios() {
       {raffles.loading && eventId && <Spinner text="Carregando sorteios..." />}
       {raffles.error && <ErrorState onRetry={raffles.reload} />}
 
-      {eventId && !raffles.loading && (
-        <>
-          {(raffles.data || []).length === 0 ? (
-            <EmptyState icon={<Trophy size={28} />} title="Nenhum sorteio neste evento." description="Crie o primeiro sorteio." />
-          ) : (
-            <div className="grid mb-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))' }}>
-              {(raffles.data || []).map((r) => (
-                <Card className="card-pad" key={r.id} style={{ cursor: 'pointer', borderColor: selectedId === r.id ? 'var(--brand)' : undefined }} onClick={() => { setSelectedId(r.id); setWinner(null); }}>
-                  <div className="flex-between mb-1">
-                    <strong>{r.prize}</strong>
-                    <StatusBadge status={r.status} label={RAFFLE_LABELS[r.status] || r.status} tone={r.status === 'OPEN' ? 'success' : 'neutral'} />
-                  </div>
-                  <p className="text-muted" style={{ margin: '0 0 6px', fontSize: '0.85rem' }}>{r.event?.name}</p>
-                  <p className="text-muted" style={{ margin: 0, fontSize: '0.82rem' }}>
-                    <Users size={13} /> {formatNumber(r._count?.winners || 0)} vencedor(es) · {formatDateTime(r.createdAt)}
-                  </p>
-                </Card>
-              ))}
-            </div>
-          )}
-        </>
+      {eventId && !raffles.loading && (raffles.data || []).length === 0 && (
+        <EmptyState icon={<Trophy size={28} />} title="Nenhum sorteio neste evento." description="Crie o primeiro sorteio." />
       )}
 
-      {selectedId && detail.data && (
-        <Card className="card-pad">
-          <div className="flex-between flex-wrap mb-3">
-            <div>
-              <h3>Roleta — {detail.data.prize}</h3>
-              <p className="text-muted" style={{ margin: 0, fontSize: '0.88rem' }}>
-                Elegíveis (presentes): <strong>{formatNumber(elig.data?.eligibleCount || 0)}</strong>
-                {!detail.data.allowRepeat && ' · sem repetição de vencedor'}
+      {eventId && !raffles.loading && (raffles.data || []).length > 0 && (
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
+          {(raffles.data || []).map((r) => (
+            <Card
+              className="card-pad"
+              key={r.id}
+              style={{ cursor: 'pointer', borderColor: selectedId === r.id ? 'var(--brand)' : undefined, boxShadow: selectedId === r.id ? 'var(--shadow)' : undefined }}
+              onClick={() => selectRaffle(r.id)}
+            >
+              <div className="flex-between mb-1">
+                <strong>{r.prize}</strong>
+                <StatusBadge status={r.status} label={RAFFLE_LABELS[r.status] || r.status} tone={r.status === 'OPEN' ? 'success' : 'neutral'} />
+              </div>
+              <p className="text-muted" style={{ margin: '0 0 6px', fontSize: '0.85rem' }}>{r.event?.name}</p>
+              <p className="text-muted" style={{ margin: 0, fontSize: '0.82rem' }}>
+                <Users size={13} /> {formatNumber(r._count?.winners || 0)} vencedor(es) · {formatDateTime(r.createdAt)}
               </p>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {selectedId && raffle && (
+        <>
+          <div className="raffle-stats">
+            <div className="raffle-stat">
+              <div className="raffle-stat__label">Elegíveis (presentes)</div>
+              <div className="raffle-stat__value">{formatNumber(eligibleCount)}</div>
+              <div className="raffle-stat__hint">{raffle.allowRepeat ? 'Repetição permitida' : 'Sem repetição de vencedor'}</div>
             </div>
-            <div className="flex">
-              {detail.data.status === 'OPEN' && (
-                <Button loading={drawing} onClick={doDraw} icon={<Wand2 size={17} />} disabled={!(elig.data?.eligibleCount > 0)}>
-                  SORTEAR
+            <div className="raffle-stat">
+              <div className="raffle-stat__label">Vencedores</div>
+              <div className="raffle-stat__value">{formatNumber(winnerCount)}</div>
+              <div className="raffle-stat__hint">Prêmio: {raffle.prize}</div>
+            </div>
+            <div className="raffle-stat">
+              <div className="raffle-stat__label">Status</div>
+              <div className="raffle-stat__value" style={{ fontSize: '1.05rem' }}>{RAFFLE_LABELS[raffle.status] || raffle.status}</div>
+              <div className="raffle-stat__hint">Criado em {formatDateTime(raffle.createdAt)}</div>
+            </div>
+            <div className="raffle-actions" style={{ alignSelf: 'center' }}>
+              {raffle.status === 'OPEN' && (
+                <Button
+                  onClick={doDraw}
+                  icon={<Wand2 size={17} />}
+                  disabled={eligibleCount <= 0 || busy}
+                  aria-label="Executar sorteio"
+                >
+                  {phase === 'spinning' ? 'Sorteando…' : phase === 'done' ? 'Sortear novamente' : 'SORTEAR'}
                 </Button>
               )}
-              {detail.data.status === 'OPEN' && (
-                <Button variant="secondary" onClick={() => closeRaffle(detail.data.id)}>Encerrar</Button>
+              {raffle.status === 'OPEN' && (
+                <Button variant="secondary" onClick={() => closeRaffle(raffle.id)} disabled={busy}>Encerrar</Button>
               )}
             </div>
           </div>
 
-          {eligibleNames.length > 0 ? (
-            <Roulette names={eligibleNames} targetIndex={targetIndex} spinKey={spinKey} onEnd={() => {}} />
-          ) : (
-            <p className="text-muted">Nenhum participante elegível (é necessário ter presença registrada).</p>
-          )}
+          {/* 2/3/4. Palco: roleta + resultado central */}
+          <div className="raffle-stage">
+            {eligibleNames.length > 0 ? (
+              <Roulette names={eligibleNames} targetIndex={targetIndex} spinKey={spinKey} onEnd={revealWinner} />
+            ) : (
+              <div className="raffle-empty">Nenhum participante elegível (é necessário ter presença registrada).</div>
+            )}
 
-          {winner && (
-            <div className="presence-success" style={{ flexDirection: 'column' }}>
-              <Trophy size={40} color="var(--brand)" />
-              <strong style={{ fontSize: '1.2rem' }}>🎉 {winner.name}</strong>
-              <span className="text-muted">Vencedor(a) de "{winner.prize}"</span>
+            <div
+              className={`raffle-result ${phase === 'spinning' ? 'is-spinning' : ''} ${phase === 'done' && winner ? 'is-done' : ''}`}
+              role="status"
+              aria-live="polite"
+            >
+              {phase === 'spinning' && (
+                <>
+                  <span className="raffle-result__label">Sorteando</span>
+                  <span className="raffle-pulse"><span className="raffle-pulse__dot" /> selecionando vencedor…</span>
+                  <p className="raffle-result__sub">O resultado aparece ao fim da roleta.</p>
+                </>
+              )}
+
+              {phase === 'done' && winner && (
+                <div className="raffle-fade">
+                  <span className="raffle-result__label">🎉 Resultado</span>
+                  <div className="raffle-result__value">{winner.name}</div>
+                  <p className="raffle-result__sub">Vencedor(a) do sorteio</p>
+                  <div className="raffle-result__meta">
+                    <span className="raffle-chip raffle-chip--gold"><Trophy size={14} /> {winner.prize || raffle.prize}</span>
+                    <span className="raffle-chip">{raffle.event?.name}</span>
+                    <span className="raffle-chip">{formatNumber(eligibleCount)} elegíveis</span>
+                    {winner.drawnAt && <span className="raffle-chip">{formatDateTime(winner.drawnAt)}</span>}
+                  </div>
+                </div>
+              )}
+
+              {phase === 'idle' && (
+                <>
+                  <span className="raffle-result__label">Pronto para sortear</span>
+                  <div className="raffle-result__value" style={{ fontSize: 'clamp(1.6rem,5vw,2.6rem)' }}>{raffle.prize}</div>
+                  <p className="raffle-result__sub">
+                    {eligibleCount > 0
+                      ? `${formatNumber(eligibleCount)} participantes elegíveis. Clique em SORTEAR.`
+                      : 'Nenhum participante elegível.'}
+                  </p>
+                </>
+              )}
             </div>
-          )}
+          </div>
 
-          <div className="mt-3">
-            <h4 style={{ marginBottom: 10 }}>Histórico</h4>
-            {(detail.data.winners || []).length === 0 ? (
+          {/* 5. Histórico */}
+          <Card className="card-pad raffle-history">
+            <h4 className="raffle-history__title"><Trophy size={17} className="raffle-medal" /> Histórico de vencedores</h4>
+            {winnerCount === 0 ? (
               <p className="text-muted" style={{ margin: 0 }}>Ainda não há vencedores.</p>
             ) : (
               <div className="table-wrap">
@@ -175,7 +269,7 @@ export default function AdminSorteios() {
                     <tr><th>Vencedor</th><th>Prêmio</th><th>Elegíveis</th><th>Data</th><th>Responsável</th></tr>
                   </thead>
                   <tbody>
-                    {detail.data.winners.map((w) => (
+                    {raffle.winners.map((w) => (
                       <tr key={w.id}>
                         <td><strong>{w.user?.name}</strong></td>
                         <td>{w.prizeSnapshot}</td>
@@ -188,8 +282,8 @@ export default function AdminSorteios() {
                 </table>
               </div>
             )}
-          </div>
-        </Card>
+          </Card>
+        </>
       )}
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Novo sorteio">
@@ -201,6 +295,6 @@ export default function AdminSorteios() {
           <Button type="submit" loading={saving}>Criar sorteio</Button>
         </form>
       </Modal>
-    </>
+    </div>
   );
 }

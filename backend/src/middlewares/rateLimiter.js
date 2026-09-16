@@ -71,9 +71,13 @@ export const apiLimiter = rateLimit({
 });
 
 /**
- * Brute-force protection for auth endpoints.
- * Counts only FAILED attempts, per (IP + email). A successful login costs
- * nothing, so N legitimate users can log in at once behind the same NAT.
+ * Per (IP + email) brute-force ceiling for routes with no credential check
+ * (register, forgot-password). Counts only FAILED attempts.
+ *
+ * V9.5: /login does NOT use this middleware. It blocks on entry, so once the
+ * (IP+email) budget was full it rejected even a CORRECT password for 15 min.
+ * The login route now verifies credentials first and applies the failure budget
+ * afterwards (`utils/loginAttempts.js`).
  */
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -87,8 +91,11 @@ export const authLimiter = rateLimit({
 });
 
 /**
- * Coarse per-IP peak limiter for the auth endpoints. Absorbs (and allows) a
- * legitimate simultaneous login wave, but a single source cannot flood.
+ * Coarse per-IP flood ceiling for the auth endpoints.
+ *
+ * V9.5: `skipSuccessfulRequests` means a legitimate login wave never consumes
+ * the quota — only failures/spam do. A 500-user burst behind one campus NAT
+ * therefore passes, while a single source cannot flood with bad attempts.
  */
 export const authPeakLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -97,6 +104,7 @@ export const authPeakLimiter = rateLimit({
   legacyHeaders: false,
   validate: false,
   keyGenerator: (req) => `ip:${req.ip}`,
+  skipSuccessfulRequests: true,
   message: tooMany('Muitas tentativas simultâneas. Tente novamente em instantes.'),
 });
 

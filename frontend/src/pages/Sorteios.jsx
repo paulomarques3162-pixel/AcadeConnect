@@ -1,8 +1,9 @@
-import { Trophy, Calendar } from 'lucide-react';
+import { Trophy, Calendar, Medal } from 'lucide-react';
 import { raffleApi } from '../api/services';
 import { useApi } from '../hooks/useApi';
 import { Card, StatusBadge, Spinner, ErrorState, EmptyState } from '../components/ui';
-import { formatDateTime } from '../utils/format';
+import { formatDateTime, formatNumber } from '../utils/format';
+import '../styles/sorteio.css';
 
 const RAFFLE_LABELS = { OPEN: 'Em andamento', CLOSED: 'Encerrado', CANCELLED: 'Cancelado' };
 
@@ -14,9 +15,12 @@ export default function Sorteios() {
   const raffles = data || [];
 
   return (
-    <>
-      <h1 style={{ fontSize: '1.6rem', marginBottom: 6 }}>Sorteios / Resultados</h1>
-      <p className="text-muted mb-3">Acompanhe os resultados dos sorteios dos eventos.</p>
+    <div className="raffle">
+      <header className="raffle-hero">
+        <span className="raffle-hero__eyebrow"><Trophy size={14} /> Resultados oficiais · Mustangs Atlética</span>
+        <h1 className="raffle-hero__title">Sorteios</h1>
+        <p className="raffle-hero__event"><Medal size={15} /> Acompanhe os vencedores dos sorteios dos eventos.</p>
+      </header>
 
       {raffles.length === 0 ? (
         <EmptyState icon={<Trophy size={28} />} title="Nenhum sorteio disponível." description="Os resultados dos sorteios aparecerão aqui." />
@@ -28,7 +32,7 @@ export default function Sorteios() {
               <Card className="card-pad" key={r.id}>
                 <div className="flex-between flex-wrap mb-2">
                   <div>
-                    <div className="flex mb-1" style={{ gap: 10 }}>
+                    <div className="flex mb-1" style={{ gap: 10, alignItems: 'center' }}>
                       <strong>{r.prize}</strong>
                       <StatusBadge
                         status={r.status}
@@ -43,14 +47,14 @@ export default function Sorteios() {
                 </div>
 
                 {winners.length > 0 ? (
-                  <div className="list">
+                  <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 12 }}>
                     {winners.map((w) => (
-                      <div className="presence-success" key={w.id} style={{ flexDirection: 'column' }}>
-                        <Trophy size={30} color="var(--brand)" />
-                        <strong style={{ fontSize: '1.05rem' }}>🏆 {w.user?.name}</strong>
-                        <span className="text-muted">
-                          Vencedor(a) de "{w.prizeSnapshot || r.prize}"{w.drawnAt ? ` · ${formatDateTime(w.drawnAt)}` : ''}
-                        </span>
+                      <div className="raffle-stat raffle-fade" key={w.id} style={{ textAlign: 'center' }}>
+                        <Medal size={26} className="raffle-medal" aria-hidden="true" />
+                        <div className="raffle-stat__value" style={{ fontSize: '1.15rem', marginTop: 6 }}>🏆 {w.user?.name}</div>
+                        <div className="raffle-stat__hint">
+                          {w.prizeSnapshot || r.prize}{w.drawnAt ? ` · ${formatDateTime(w.drawnAt)}` : ''}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -62,6 +66,6 @@ export default function Sorteios() {
           })}
         </div>
       )}
-    </>
+    </div>
   );
 }

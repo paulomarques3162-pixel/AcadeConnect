@@ -1,0 +1,319 @@
+/* ============================================================
+   SORTEIO — scoped design system (V9.5)
+   The ONLY area allowed to receive a broad visual change.
+   Every selector is prefixed with `.raffle-` (or `.raffle`) so it
+   cannot affect the global layout, header, sidebar or other pages.
+   Uses the existing theme variables (--brand, --gold, --surface...).
+   ============================================================ */
+
+.raffle {
+  --raffle-gold: var(--gold, #d4af37);
+  --raffle-ring: color-mix(in srgb, var(--brand) 22%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ---------- 1. Cabeçalho do sorteio ---------- */
+.raffle-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg, 20px);
+  padding: 26px 28px;
+  color: #f2fbf5;
+  background:
+    radial-gradient(120% 160% at 88% -20%, color-mix(in srgb, var(--gold, #d4af37) 34%, transparent) 0%, transparent 55%),
+    linear-gradient(135deg, #0b2415 0%, #14532d 55%, #1f7a44 100%);
+  box-shadow: var(--shadow-lg, 0 20px 45px rgba(15, 23, 42, 0.16));
+}
+.raffle-hero::after {
+  content: '';
+  position: absolute;
+  right: -60px;
+  bottom: -80px;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 0 0 30px rgba(255, 255, 255, 0.04);
+  pointer-events: none;
+}
+.raffle-hero__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  margin-bottom: 10px;
+}
+.raffle-hero__title {
+  margin: 0 0 6px;
+  font-size: clamp(1.35rem, 3.4vw, 2.05rem);
+  line-height: 1.15;
+  font-weight: 800;
+}
+.raffle-hero__event {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.raffle-hero__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.raffle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(4px);
+}
+.raffle-chip--gold { background: var(--raffle-gold); color: #241c00; border-color: transparent; }
+
+/* ---------- Stats ---------- */
+.raffle-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+}
+.raffle-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 14px);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+}
+.raffle-stat__label {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.raffle-stat__value {
+  margin-top: 4px;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.1;
+}
+.raffle-stat__hint { margin-top: 2px; font-size: 0.8rem; color: var(--text-soft); }
+
+/* ---------- 2/4. Palco + resultado central ---------- */
+.raffle-stage {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(300px, 1.05fr);
+  gap: 24px;
+  align-items: stretch;
+}
+@media (max-width: 860px) {
+  .raffle-stage { grid-template-columns: 1fr; }
+}
+
+.raffle-result {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 340px;
+  padding: 30px 26px;
+  border-radius: var(--radius-lg, 20px);
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(90% 70% at 50% 0%, color-mix(in srgb, var(--brand) 10%, transparent) 0%, transparent 70%),
+    var(--surface);
+  box-shadow: var(--shadow);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+.raffle-result.is-spinning { border-color: color-mix(in srgb, var(--brand) 45%, var(--border)); }
+.raffle-result.is-done { border-color: var(--raffle-gold); box-shadow: 0 0 0 3px color-mix(in srgb, var(--raffle-gold) 22%, transparent), var(--shadow-lg); }
+
+.raffle-result__label {
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.raffle-result__value {
+  font-size: clamp(2.1rem, 8vw, 4rem);
+  font-weight: 900;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  color: var(--brand);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.is-done .raffle-result__value { color: var(--brand-700, #14532d); }
+.raffle-result__sub {
+  margin-top: 8px;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+}
+.raffle-result__meta {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.raffle-result__meta .raffle-chip {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+  backdrop-filter: none;
+}
+.raffle-result__meta .raffle-chip--gold { background: var(--raffle-gold); color: #241c00; }
+
+/* pulsing "sorteando" dot */
+.raffle-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+  color: var(--brand);
+}
+.raffle-pulse__dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--brand);
+  animation: rafflePulse 1s ease-in-out infinite;
+}
+@keyframes rafflePulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.7); opacity: 0.35; }
+}
+
+.raffle-fade { animation: raffleFade 0.45s ease both; }
+@keyframes raffleFade {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- Roleta (scoped, does not touch global .roulette) ---------- */
+.raffle-wheel-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 22px;
+  border-radius: var(--radius-lg, 20px);
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+}
+.raffle-wheel {
+  position: relative;
+  width: min(360px, 82vw);
+  aspect-ratio: 1;
+}
+.raffle-wheel__disc {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 8px solid var(--surface);
+  box-shadow: var(--shadow-lg), inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+.raffle-wheel__label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  padding-top: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.raffle-wheel__pointer {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-top: 24px solid var(--raffle-gold);
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.3));
+  z-index: 3;
+}
+.raffle-wheel__hub {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 88px; height: 88px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--brand);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 900; font-size: 0.72rem; letter-spacing: 0.08em;
+  text-align: center;
+  box-shadow: var(--shadow), inset 0 0 0 2px color-mix(in srgb, var(--brand) 20%, transparent);
+  z-index: 2;
+}
+.raffle-wheel__spin-text {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--text-muted);
+  min-height: 1.2em;
+}
+
+/* ---------- 6. Botões ---------- */
+.raffle-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.raffle-actions .btn { min-height: 46px; }
+.raffle-actions .btn--primary { font-weight: 800; letter-spacing: 0.02em; }
+
+/* ---------- 5. Histórico ---------- */
+.raffle-history__title {
+  display: flex; align-items: center; gap: 9px;
+  margin: 0 0 14px; font-size: 1.05rem;
+}
+.raffle-history .table td strong { color: var(--text); }
+.raffle-empty {
+  text-align: center;
+  padding: 26px 18px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+}
+.raffle-medal { color: var(--raffle-gold); }
+
+/* ---------- Responsivo ---------- */
+@media (max-width: 640px) {
+  .raffle-hero { padding: 20px; }
+  .raffle-result { min-height: 260px; padding: 22px 16px; }
+  .raffle-result__value { font-size: clamp(1.9rem, 11vw, 2.8rem); }
+  .raffle-wheel-wrap { padding: 16px; }
+  .raffle-wheel__hub { width: 72px; height: 72px; font-size: 0.64rem; }
+  .raffle-actions { flex-direction: column; }
+  .raffle-actions .btn { width: 100%; }
+  .raffle-stats { grid-template-columns: 1fr 1fr; }
+}
+
+/* Respeita quem prefere menos animação. */
+@media (prefers-reduced-motion: reduce) {
+  .raffle-wheel__disc { transition-duration: 0.01ms !important; }
+  .raffle-pulse__dot { animation: none; }
+  .raffle-fade { animation: none; }
+}

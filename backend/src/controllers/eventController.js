@@ -10,12 +10,31 @@ import { createAuditLog } from '../services/auditLogService.js';
 import { createNotifications } from '../services/notificationService.js';
 import { autoIssueCertificatesForEvent } from '../services/certificateService.js';
 import { cacheWrap, invalidate } from '../utils/cache.js';
+import { eventListSelectFor } from '../utils/eventProjection.js';
 import { env } from '../config/env.js';
 
 // Public event listings/details are read constantly and change rarely: a short
 // TTL cache removes the repeated identical queries that dominate concurrent
 // traffic. Invalidated explicitly on every write.
 const EVENTS_CACHE_PREFIX = 'events:';
+
+// Pagination guardrails. A caller must never be able to ask for 999999 rows and
+// force the instance to serialize/compress an unbounded payload. Public reads
+// are capped low; staff screens legitimately page through up to 200 at a time.
+const EVENTS_LIST_DEFAULT_LIMIT = 12;
+const EVENTS_LIST_MAX_LIMIT = Number(process.env.EVENTS_LIST_MAX_LIMIT || 60);
+const EVENTS_LIST_MAX_LIMIT_STAFF = Number(process.env.EVENTS_LIST_MAX_LIMIT_STAFF || 200);
+
+/** Clamp a positive integer query param to [1, max], falling back on garbage. */
+function toPositiveInt(value, fallback, max) {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(n, max);
+}
+
+function isStaff(user) {
+  return !!user && (user.role === 'ADMIN' || user.role === 'ORGANIZER');
+}
 
 const eventInclude = (includeStats = false) => ({
   institution: { select: { id: true, name: true } },
@@ -74,8 +93,6 @@ function validateEventPayment({ isPaid, priceCents, minPriceCents, maxPriceCents
 
 export const listEvents = asyncHandler(async (req, res) => {
   const {
-    page = 1,
-    limit = 12,
     search = '',
     category,
     modality,
@@ -84,6 +101,14 @@ export const listEvents = asyncHandler(async (req, res) => {
     date,
     sort = 'recent',
   } = req.query;
+
+  // The projection depends on the caller: anonymous visitors get the minimum
+  // contract, staff get the superset their screens use. This is decided from the
+  // verified token (optionalAuthenticate), never from a client-supplied flag.
+  const staff = isStaff(req.user);
+  const maxLimit = staff ? EVENTS_LIST_MAX_LIMIT_STAFF : EVENTS_LIST_MAX_LIMIT;
+  const pageNum = toPositiveInt(req.query.page, 1, Number.MAX_SAFE_INTEGER);
+  const limitNum = toPositiveInt(req.query.limit, EVENTS_LIST_DEFAULT_LIMIT, maxLimit);
 
   const where = { deletedAt: null };
   if (search) {
@@ -114,41 +139,51 @@ export const listEvents = asyncHandler(async (req, res) => {
         ? { registrations: { _count: 'desc' } }
         : { createdAt: 'desc' };
 
-  // Search results are not cached (high cardinality); unfiltered listing is.
+  // Search results are not cached in-process (high cardinality); unfiltered
+  // listing is. The variant (public/staff) is part of the key so the two
+  // projections can never be served for one another.
   const runQuery = async () => {
     const [total, events] = await Promise.all([
       prisma.event.count({ where }),
       prisma.event.findMany({
         where,
         orderBy,
-        skip: (Number(page) - 1) * Number(limit),
-        take: Number(limit),
-        include: eventInclude(),
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+        select: eventListSelectFor({ staff }),
       }),
     ]);
     return {
       events: events.map(enrichEvent),
       meta: {
-        page: Number(page),
-        limit: Number(limit),
+        page: pageNum,
+        limit: limitNum,
         total,
-        pages: Math.ceil(total / Number(limit)),
+        pages: Math.ceil(total / limitNum),
       },
     };
   };
 
+  const variant = staff ? 'staff' : 'public';
   const payload = search
     ? await runQuery()
     : await cacheWrap(
-        `${EVENTS_CACHE_PREFIX}list:${page}:${limit}:${category || ''}:${modality || ''}:${status || ''}:${location || ''}:${date || ''}:${sort}`,
+        `${EVENTS_CACHE_PREFIX}list:${variant}:${pageNum}:${limitNum}:${category || ''}:${modality || ''}:${status || ''}:${location || ''}:${date || ''}:${sort}`,
         env.publicCacheTtlMs,
         runQuery
       );
 
+  // `Vary` makes browser/CDN caches key on the credentials: a cached anonymous
+  // response can never be replayed to a logged-in staff request (and vice
+  // versa). Only anonymous, identical-for-everyone public data gets a public
+  // Cache-Control; authenticated responses are never publicly cached.
+  res.vary('Authorization');
+  res.vary('Cookie');
   return apiResponse(res, {
     message: 'Eventos listados.',
     data: { events: payload.events },
     meta: payload.meta,
+    cacheSeconds: !staff && !search ? Math.max(1, Math.floor(env.publicCacheTtlMs / 1000)) : 0,
   });
 });
 
@@ -181,7 +216,11 @@ export const getEvent = asyncHandler(async (req, res) => {
   };
 
   const data = await cacheWrap(`${EVENTS_CACHE_PREFIX}one:${idOrSlug}`, env.publicCacheTtlMs, build);
-  return apiResponse(res, { message: 'Evento.', data });
+  return apiResponse(res, {
+    message: 'Evento.',
+    data,
+    cacheSeconds: Math.max(1, Math.floor(env.publicCacheTtlMs / 1000)),
+  });
 });
 
 // ---------- Admin / Organizer operations ----------

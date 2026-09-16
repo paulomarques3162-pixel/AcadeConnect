@@ -6,7 +6,9 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { publicUrl } from '../config/multer.js';
 import { createAuditLog } from '../services/auditLogService.js';
 import { invalidateUserCache } from '../middlewares/auth.js';
+import { broadcastToAllUsers } from '../services/notificationService.js';
 import { cacheWrap, invalidate } from '../utils/cache.js';
+import { parsePagination, paginationMeta } from '../utils/pagination.js';
 import { env } from '../config/env.js';
 
 const DASHBOARD_CACHE_KEY = 'admin:dashboard';
@@ -113,7 +115,8 @@ async function buildDashboard() {
 // ---------- User management (ADMIN) ----------
 
 export const listUsers = asyncHandler(async (req, res) => {
-  const { search, role, page = 1, limit = 20 } = req.query;
+  const { search, role } = req.query;
+  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 200 });
   const where = { deletedAt: null };
   if (role) where.role = role;
   if (search) {
@@ -129,14 +132,14 @@ export const listUsers = asyncHandler(async (req, res) => {
         _count: { select: { registrations: true, certificates: true } },
       },
       orderBy: { createdAt: 'desc' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
+      skip,
+      take,
     }),
   ]);
   return apiResponse(res, {
     message: 'Usuários.',
     data: { users: users.map((u) => ({ ...u, avatarUrl: publicUrl(u.avatarUrl) })) },
-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
+    meta: paginationMeta({ page, limit, total }),
   });
 });
 
@@ -220,7 +223,8 @@ export const deleteInstitution = asyncHandler(async (req, res) => {
 // ---------- Audit logs (ADMIN) ----------
 
 export const listAuditLogs = asyncHandler(async (req, res) => {
-  const { action, page = 1, limit = 20 } = req.query;
+  const { action } = req.query;
+  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 200 });
   const where = {};
   if (action) where.action = action;
   const [total, logs] = await Promise.all([
@@ -229,21 +233,24 @@ export const listAuditLogs = asyncHandler(async (req, res) => {
       where,
       include: { user: { select: { name: true, email: true } } },
       orderBy: { createdAt: 'desc' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
+      skip,
+      take,
     }),
   ]);
   return apiResponse(res, {
     message: 'Logs de auditoria.',
     data: { logs },
-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
+    meta: paginationMeta({ page, limit, total }),
   });
 });
 
 // ---------- Admin registrations list ----------
 
 export const listAllRegistrations = asyncHandler(async (req, res) => {
-  const { eventId, search, status, page = 1, limit = 20 } = req.query;
+  const { eventId, search, status } = req.query;
+  // The admin "ver inscritos" modal asks for limit=500, so this endpoint gets a
+  // higher ceiling than the other admin lists.
+  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 500 });
   const where = {};
   if (eventId) where.eventId = eventId;
   if (status) where.status = status;
@@ -266,13 +273,40 @@ export const listAllRegistrations = asyncHandler(async (req, res) => {
         _count: { select: { attendance: true, certificates: true } },
       },
       orderBy: { createdAt: 'desc' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
+      skip,
+      take,
     }),
   ]);
   return apiResponse(res, {
     message: 'Inscrições.',
     data: { registrations },
-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
+    meta: paginationMeta({ page, limit, total }),
+  });
+});
+
+// ---------- General communication ----------
+
+/**
+ * Send a general communication to every active user (e.g. "O AcadeConnect foi
+ * atualizado"). In-app notification + realtime push. Admin only.
+ */
+export const broadcastNotification = asyncHandler(async (req, res) => {
+  const { title, message, link, requestId } = req.body;
+  const result = await broadcastToAllUsers({ title, message, link, requestId });
+
+  if (!result.duplicate) {
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'GENERAL_BROADCAST',
+      resource: 'Notification',
+      details: { title, recipients: result.recipients },
+    });
+  }
+
+  return apiResponse(res, {
+    message: result.duplicate
+      ? 'Esta comunicação já foi enviada há instantes.'
+      : `Comunicação enviada para ${result.recipients} usuário(s).`,
+    data: result,
   });
 });

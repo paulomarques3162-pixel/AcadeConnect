@@ -8,8 +8,10 @@ import activityRoutes from './activity.routes.js';
 
 const router = Router();
 
-// Public
-router.get('/', ctrl.listEvents);
+// Public. optionalAuthenticate lets staff receive their (superset) projection
+// without a separate route; the projection is chosen from the verified token,
+// never from client input. Query is validated + clamped before the controller.
+router.get('/', optionalAuthenticate, validate(eventSchemas.listQuery), ctrl.listEvents);
 router.get('/:idOrSlug', optionalAuthenticate, ctrl.getEvent);
 
 // Activities nested under an event (public)

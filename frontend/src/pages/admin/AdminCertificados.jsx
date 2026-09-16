@@ -22,6 +22,10 @@ export default function AdminCertificados() {
   const [saving, setSaving] = useState(false);
   const [toCancel, setToCancel] = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  // Bulk cancellation of the certificates of every PRESENT participant.
+  const [bulkEvent, setBulkEvent] = useState('');
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const events = useApi(() => eventApi.list({ limit: 100 }).then((r) => r.data.events), []);
 
   const { data, loading, error, reload } = useApi(
@@ -39,6 +43,24 @@ export default function AdminCertificados() {
       reload();
     } catch (e) { toast.error(getErrorMessage(e)); }
     finally { setAutoBusy(false); }
+  };
+
+  const runBulkCancel = async () => {
+    if (!bulkEvent) return toast.error('Selecione o evento.');
+    setBulkBusy(true);
+    try {
+      const res = await certificateApi.cancelPresent(bulkEvent, {
+        reason: 'Cancelamento em massa dos certificados dos participantes presentes',
+      });
+      const { affected = 0, presentParticipants = 0 } = res.data || {};
+      toast.success(
+        affected > 0
+          ? `${affected} certificado(s) cancelado(s) entre ${presentParticipants} participante(s) presente(s).`
+          : `Nenhum certificado ativo para cancelar (${presentParticipants} presente(s)).`
+      );
+      reload();
+    } catch (e) { toast.error(getErrorMessage(e)); }
+    finally { setBulkBusy(false); setBulkOpen(false); }
   };
 
   const download = async (id, code) => {
@@ -114,6 +136,26 @@ export default function AdminCertificados() {
         </div>
       </div>
 
+      <div className="card mb-3" style={{ padding: 16 }}>
+        <div className="flex flex-wrap" style={{ gap: 12, alignItems: 'flex-end', justifyContent: 'space-between' }}>
+          <div style={{ minWidth: 260, flex: 1 }}>
+            <strong style={{ display: 'block', marginBottom: 4 }}>Cancelamento em massa</strong>
+            <span className="text-muted" style={{ fontSize: '0.82rem' }}>
+              Cancela (preserva histórico) os certificados de <strong>participantes presentes</strong> no evento selecionado. Ausentes e outros eventos não são afetados.
+            </span>
+          </div>
+          <div className="flex" style={{ gap: 8, alignItems: 'flex-end' }}>
+            <Select value={bulkEvent} onChange={(e) => setBulkEvent(e.target.value)} style={{ maxWidth: 260 }}>
+              <option value="">Evento para cancelamento em massa</option>
+              {(events.data || []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </Select>
+            <Button variant="danger" disabled={!bulkEvent} onClick={() => setBulkOpen(true)} icon={<XCircle size={17} />}>
+              Cancelar dos presentes
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div className="filters mb-3">
         <div className="field field--search"><SearchBar value={search} onChange={setSearch} placeholder="Pesquisar participante..." /></div>
         <Field label="Evento">
@@ -134,6 +176,17 @@ export default function AdminCertificados() {
       {error && <ErrorState onRetry={reload} />}
       {!loading && !error && <DataTable columns={columns} rows={data?.data?.certificates || []} loading={loading} emptyTitle={<><Award size={28} /> Nenhum certificado.</>} />}
       <Pagination page={data?.meta?.page} pages={data?.meta?.pages} total={data?.meta?.total} onPage={setPage} />
+
+      <ConfirmDialog
+        open={bulkOpen}
+        title="Cancelar certificados dos participantes presentes"
+        message="Esta ação irá cancelar a emissão dos certificados dos participantes presentes neste evento. O histórico é preservado (nada é apagado). Deseja continuar?"
+        confirmLabel="Cancelar certificados"
+        danger
+        loading={bulkBusy}
+        onConfirm={runBulkCancel}
+        onClose={() => setBulkOpen(false)}
+      />
 
       <ConfirmDialog
         open={!!toCancel}

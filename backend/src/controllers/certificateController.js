@@ -4,8 +4,9 @@ import { ApiError } from '../utils/apiError.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { publicUrl } from '../config/multer.js';
-import { issueEventCertificate, issueActivityCertificate, autoIssueCertificatesForEvent, correctCertificate as correctCertificateService, cancelCertificate as cancelCertificateService } from '../services/certificateService.js';
+import { issueEventCertificate, issueActivityCertificate, autoIssueCertificatesForEvent, correctCertificate as correctCertificateService, cancelCertificate as cancelCertificateService, cancelCertificatesForPresentParticipants } from '../services/certificateService.js';
 import { createAuditLog } from '../services/auditLogService.js';
+import { parsePagination, paginationMeta } from '../utils/pagination.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -106,7 +107,8 @@ export const validateCertificate = asyncHandler(async (req, res) => {
 // ---------- Admin ----------
 
 export const listCertificates = asyncHandler(async (req, res) => {
-  const { search, eventId, status, page = 1, limit = 20 } = req.query;
+  const { search, eventId, status } = req.query;
+  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 200 });
   const where = {};
   if (eventId) where.eventId = eventId;
   if (status) where.status = status;
@@ -119,14 +121,14 @@ export const listCertificates = asyncHandler(async (req, res) => {
       where,
       include: { ...certInclude, user: { select: { id: true, name: true, email: true } }, registration: { select: { code: true } } },
       orderBy: { issueDate: 'desc' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
+      skip,
+      take,
     }),
   ]);
   return apiResponse(res, {
     message: 'Certificados.',
     data: { certificates: certificates.map((c) => ({ ...c, pdfUrl: c.pdfUrl ? `${env.apiUrl}/uploads/${c.pdfUrl}` : null })) },
-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
+    meta: paginationMeta({ page, limit, total }),
   });
 });
 
@@ -147,6 +149,25 @@ export const cancelCertificate = asyncHandler(async (req, res) => {
     operatorId: req.user.id,
   });
   return apiResponse(res, { message: 'Certificado cancelado.', data: { certificate } });
+});
+
+/**
+ * Bulk-cancel the event-level certificates of all present participants of an
+ * event. Used by the admin certificates screen. Returns how many were affected.
+ */
+export const bulkCancelPresent = asyncHandler(async (req, res) => {
+  const { eventId } = req.params;
+  const result = await cancelCertificatesForPresentParticipants(eventId, {
+    reason: req.body?.reason,
+    operatorId: req.user.id,
+  });
+  return apiResponse(res, {
+    message:
+      result.affected > 0
+        ? `${result.affected} certificado(s) cancelado(s).`
+        : 'Nenhum certificado ativo para cancelar entre os participantes presentes.',
+    data: result,
+  });
 });
 
 export const runAutoIssue = asyncHandler(async (req, res) => {

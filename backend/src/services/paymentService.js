@@ -4,6 +4,7 @@ import { createAuditLog } from './auditLogService.js';
 import { createNotification } from './notificationService.js';
 import { getActivePixConfig, buildPayloadWith } from './pixService.js';
 import { generatePaymentCode } from '../utils/codes.js';
+import { parsePagination, paginationMeta } from '../utils/pagination.js';
 
 const paymentInclude = {
   event: { select: { id: true, name: true, isPaid: true, priceCents: true } },
@@ -147,6 +148,9 @@ export async function listMyPayments(userId, { limit = 100 } = {}) {
 }
 
 export async function listPayments({ status, eventId, userId, page = 1, limit = 20, search } = {}) {
+  ({ page, limit } = parsePagination({ page, limit }, { defaultLimit: 20, maxLimit: 200 }));
+  const skip = (page - 1) * limit;
+  const take = limit;
   const where = {};
   if (status) where.status = status;
   if (eventId) where.eventId = eventId;
@@ -164,11 +168,11 @@ export async function listPayments({ status, eventId, userId, page = 1, limit = 
       where,
       include: { ...paymentInclude, user: { select: { id: true, name: true, email: true } } },
       orderBy: { createdAt: 'desc' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
+      skip,
+      take,
     }),
   ]);
-  return { payments, meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } };
+  return { payments, meta: paginationMeta({ page, limit, total }) };
 }
 
 /**

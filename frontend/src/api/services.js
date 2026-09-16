@@ -123,6 +123,7 @@ export const certificateApi = {
   issue: (data) => api.post('/certificates/issue', data).then(unwrap),
   correct: (id, data) => api.post(`/certificates/${id}/correct`, data).then(unwrap),
   cancel: (id, data = {}) => api.post(`/certificates/${id}/cancel`, data).then(unwrap),
+  cancelPresent: (eventId, data = {}) => api.post(`/certificates/cancel-present/${eventId}`, data).then(unwrap),
   auto: (eventId) => api.post(`/certificates/auto/${eventId}`).then(unwrap),
   adminList: (params) => api.get('/certificates/admin/list', { params }).then(unwrap),
 };
@@ -148,6 +149,7 @@ export const adminApi = {
   deleteInstitution: (id) => api.delete(`/admin/institutions/${id}`).then(unwrap),
   logs: (params) => api.get('/admin/logs', { params }).then(unwrap),
   reports: (params) => api.get('/admin/reports', { params }).then(unwrap),
+  broadcast: (data) => api.post('/admin/notifications/broadcast', data).then(unwrap),
   exportUrl: '/admin/export',
 };
 

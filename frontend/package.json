@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "acadeconnect": "file:..",
     "axios": "^1.7.7",
     "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.446.0",

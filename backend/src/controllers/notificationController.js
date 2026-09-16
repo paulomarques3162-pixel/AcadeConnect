@@ -2,23 +2,24 @@ import { prisma } from '../config/prisma.js';
 import { ApiError } from '../utils/apiError.js';
 import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { parsePagination, paginationMeta } from '../utils/pagination.js';
 
 export const listMyNotifications = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 20 } = req.query;
+  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 100 });
   const [total, notifications] = await Promise.all([
     prisma.notification.count({ where: { userId: req.user.id } }),
     prisma.notification.findMany({
       where: { userId: req.user.id },
       orderBy: { createdAt: 'desc' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
+      skip,
+      take,
     }),
   ]);
   const unread = await prisma.notification.count({ where: { userId: req.user.id, read: false } });
   return apiResponse(res, {
     message: 'Notificações.',
     data: { notifications, unread },
-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
+    meta: paginationMeta({ page, limit, total }),
   });
 });
 

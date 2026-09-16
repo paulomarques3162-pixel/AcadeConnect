@@ -85,6 +85,23 @@ export const eventSchemas = {
       organizerId: Joi.string().allow('', null),
     }),
   },
+  // Query contract for the public listing. `stripUnknown` drops junk params and
+  // the caps stop an unbounded `limit`. The server still clamps defensively.
+  listQuery: {
+    query: Joi.object({
+      page: Joi.number().integer().min(1).max(1000000).default(1),
+      limit: Joi.number().integer().min(1).max(200).default(12),
+      search: Joi.string().trim().max(120).allow('').default(''),
+      category: Joi.string().trim().max(120).allow(''),
+      modality: Joi.string().valid('PRESENCIAL', 'ONLINE', 'HIBRIDO').allow(''),
+      status: Joi.string()
+        .valid('DRAFT', 'PUBLISHED', 'OPEN', 'ONGOING', 'CLOSED', 'CANCELLED')
+        .allow(''),
+      location: Joi.string().trim().max(120).allow(''),
+      date: Joi.string().valid('upcoming', 'past').allow(''),
+      sort: Joi.string().valid('recent', 'closest', 'popular').default('recent'),
+    }),
+  },
   update: {
     params: Joi.object({ id: Joi.string().required() }),
     body: Joi.object({}).unknown(true),
@@ -217,6 +234,10 @@ export const certificateSchemas = {
     params: Joi.object({ id: Joi.string().required() }),
     body: Joi.object({ reason: Joi.string().trim().max(300).allow('', null) }),
   },
+  bulkCancelPresent: {
+    params: Joi.object({ eventId: Joi.string().required() }),
+    body: Joi.object({ reason: Joi.string().trim().max(300).allow('', null) }),
+  },
   codeParam: { params: Joi.object({ code: Joi.string().required() }) },
   idParam: { params: Joi.object({ id: Joi.string().required() }) },
 };
@@ -253,6 +274,20 @@ export const institutionSchemas = {
     }),
   },
   idParam: { params: Joi.object({ id: Joi.string().required() }) },
+};
+
+/**
+ * Administrative communication sent to every active user. `requestId` is an
+ * optional client-generated idempotency key: replaying the same request within
+ * a minute will not create a second notification for each user.
+ */
+export const broadcastSchemas = {
+  body: Joi.object({
+    title: Joi.string().trim().min(3).max(120).required(),
+    message: Joi.string().trim().min(3).max(1000).required(),
+    link: Joi.string().trim().max(300).allow('', null),
+    requestId: Joi.string().trim().max(100).allow('', null),
+  }),
 };
 
 export const exportSchemas = {

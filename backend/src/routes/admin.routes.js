@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { validate } from '../middlewares/validate.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
 import { heavyLimiter } from '../middlewares/rateLimiter.js';
-import { adminUserSchemas, institutionSchemas, exportSchemas } from '../validations/schemas.js';
+import { adminUserSchemas, institutionSchemas, exportSchemas, broadcastSchemas } from '../validations/schemas.js';
 import * as ctrl from '../controllers/adminController.js';
 import * as reportCtrl from '../controllers/reportController.js';
 import * as exportCtrl from '../controllers/exportController.js';
@@ -30,6 +30,9 @@ router.delete('/institutions/:id', authorize('ADMIN'), validate(institutionSchem
 
 // Audit logs
 router.get('/logs', ctrl.listAuditLogs);
+
+// General communication to all users (ADMIN only)
+router.post('/notifications/broadcast', heavyLimiter, authorize('ADMIN'), validate(broadcastSchemas), ctrl.broadcastNotification);
 
 // Reports
 router.get('/reports', reportCtrl.reports);

@@ -4,6 +4,7 @@ import { apiResponse } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { registerAttendanceByQr, setManualAttendance, findRegistrationByScan } from '../services/attendanceService.js';
 import { createAuditLog } from '../services/auditLogService.js';
+import { parsePagination, paginationMeta } from '../utils/pagination.js';
 
 /**
  * Operator scans a QR code (opaque token) + selects activity.
@@ -275,7 +276,8 @@ export const searchParticipants = asyncHandler(async (req, res) => {
 });
 
 export const listAllAttendance = asyncHandler(async (req, res) => {
-  const { eventId, activityId, search, status, page = 1, limit = 20 } = req.query;
+  const { eventId, activityId, search, status } = req.query;
+  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 200 });
   const where = {};
   if (eventId) where.eventId = eventId;
   if (activityId) where.activityId = activityId;
@@ -294,13 +296,13 @@ export const listAllAttendance = asyncHandler(async (req, res) => {
         registration: { select: { code: true } },
       },
       orderBy: { recordedAt: 'desc' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
+      skip,
+      take,
     }),
   ]);
   return apiResponse(res, {
     message: 'Presenças.',
     data: { attendance },
-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
+    meta: paginationMeta({ page, limit, total }),
   });
 });

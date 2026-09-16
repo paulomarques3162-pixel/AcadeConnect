@@ -21,6 +21,8 @@ router.post('/issue', heavyLimiter, authorize('ADMIN', 'ORGANIZER'), validate(ce
 router.post('/:id/correct', heavyLimiter, authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.correct), ctrl.correctCertificate);
 router.post('/:id/cancel', authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.cancel), ctrl.cancelCertificate);
 router.post('/auto/:eventId', heavyLimiter, authorize('ADMIN', 'ORGANIZER'), ctrl.runAutoIssue);
+// Bulk cancellation of the certificates of every present participant of an event.
+router.post('/cancel-present/:eventId', heavyLimiter, authorize('ADMIN', 'ORGANIZER'), validate(certificateSchemas.bulkCancelPresent), ctrl.bulkCancelPresent);
 router.get('/admin/list', authorize('ADMIN', 'ORGANIZER'), ctrl.listCertificates);
 
 export default router;

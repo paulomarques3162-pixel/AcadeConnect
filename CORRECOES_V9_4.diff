@@ -1,0 +1,1250 @@
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/scripts/fixtures/events_list_limit12.prod.json acade/backend/scripts/fixtures/events_list_limit12.prod.json
+--- acade_orig/backend/scripts/fixtures/events_list_limit12.prod.json	1970-01-01 00:00:00.000000000 +0000
++++ acade/backend/scripts/fixtures/events_list_limit12.prod.json	2026-09-16 12:55:15.611508597 +0000
+@@ -0,0 +1 @@
++{"success":true,"message":"Eventos listados.","data":{"events":[{"id":"cmu3xwd0z000lqnils6p6jlyk","name":"SAVET TERÇA_FEIRA (cópia)","slug":"savet-terca-feira-copia-1","shortDescription":"Terça feira","description":"...","bannerUrl":"https://acadeconnect-backend.onrender.com/uploads/5a9a31f0a6a2abadc59bb4484d0ecb70.jpg","startDate":"2026-09-15T00:00:00.000Z","endDate":"2026-09-15T00:00:00.000Z","startTime":"19:00","location":"Anfiteatro","address":"Unidade Educacional Anhanguera- Leme","modality":"PRESENCIAL","category":"Semana academia da veterinária","capacity":500,"registrationStart":"2026-09-11T00:00:00.000Z","registrationEnd":"2026-09-15T23:59:59.999Z","status":"DRAFT","allowRegistration":true,"allowCancellation":true,"requireActivityRegistration":false,"requireAttendance":true,"automaticCertificate":true,"minimumAttendancePercentage":100,"certificateHours":3,"isPaid":false,"priceCents":null,"minPriceCents":null,"maxPriceCents":null,"institutionId":null,"organizerId":"cmtvls889000813xikxkex06y","deletedAt":null,"createdAt":"2026-09-16T10:10:15.924Z","updatedAt":"2026-09-16T10:10:15.924Z","institution":null,"organizer":{"id":"cmtvls889000813xikxkex06y","name":"paulo"},"_count":{"activities":1,"registrations":0}},{"id":"cmu3xvbuw000dqnilsj91o24b","name":"SAVET TERÇA_FEIRA (cópia)","slug":"savet-terca-feira-copia","shortDescription":"Terça feira","description":"...","bannerUrl":"https://acadeconnect-backend.onrender.com/uploads/5a9a31f0a6a2abadc59bb4484d0ecb70.jpg","startDate":"2026-09-15T00:00:00.000Z","endDate":"2026-09-15T00:00:00.000Z","startTime":"19:00","location":"Anfiteatro","address":"Unidade Educacional Anhanguera- Leme","modality":"PRESENCIAL","category":"Semana academia da veterinária","capacity":500,"registrationStart":"2026-09-11T00:00:00.000Z","registrationEnd":"2026-09-15T23:59:59.999Z","status":"DRAFT","allowRegistration":true,"allowCancellation":true,"requireActivityRegistration":false,"requireAttendance":true,"automaticCertificate":true,"minimumAttendancePercentage":100,"certificateHours":3,"isPaid":false,"priceCents":null,"minPriceCents":null,"maxPriceCents":null,"institutionId":null,"organizerId":"cmtvls889000813xikxkex06y","deletedAt":null,"createdAt":"2026-09-16T10:09:27.752Z","updatedAt":"2026-09-16T10:09:27.752Z","institution":null,"organizer":{"id":"cmtvls889000813xikxkex06y","name":"paulo"},"_count":{"activities":1,"registrations":0}},{"id":"cmtxhf559007pfsiblcwydmpr","name":"SAVET SEXTA_FEIRA","slug":"savet-sexta-feira","shortDescription":"Sexta feira","description":"...","bannerUrl":"https://acadeconnect-backend.onrender.com/uploads/88932ccd50fdc6604665445dbf79de67.jpg","startDate":"2026-09-18T00:00:00.000Z","endDate":"2026-09-18T00:00:00.000Z","startTime":"19:00","location":"Anfiteatro","address":"Unidade Educacional Anhanguera-Leme","modality":"PRESENCIAL","category":"Semana academia da veterinária","capacity":500,"registrationStart":"2026-09-11T00:00:00.000Z","registrationEnd":"2026-09-18T23:59:59.999Z","status":"ONGOING","allowRegistration":true,"allowCancellation":true,"requireActivityRegistration":false,"requireAttendance":true,"automaticCertificate":true,"minimumAttendancePercentage":100,"certificateHours":3,"isPaid":false,"priceCents":null,"minPriceCents":null,"maxPriceCents":null,"institutionId":null,"organizerId":"cmtucfaef0002mc8cpzkogbeb","deletedAt":null,"createdAt":"2026-09-11T21:42:21.646Z","updatedAt":"2026-09-15T13:45:43.335Z","institution":null,"organizer":{"id":"cmtucfaef0002mc8cpzkogbeb","name":"Administrador Demo"},"_count":{"activities":1,"registrations":134}},{"id":"cmtxhd5cr007hfsibbc24x4j8","name":"SAVET QUINTA_FEIRA","slug":"savet-quinta-feira","shortDescription":"Quinta feira","description":"...","bannerUrl":"https://acadeconnect-backend.onrender.com/uploads/69b088fa7eecac9093e2f6c90e917548.jpg","startDate":"2026-09-17T00:00:00.000Z","endDate":"2026-09-17T00:00:00.000Z","startTime":"19:00","location":"Anfiteatro","address":"Unidade Educacional Anhanguera-Leme","modality":"PRESENCIAL","category":"Semana academia da veterinária","capacity":500,"registrationStart":"2026-09-11T00:00:00.000Z","registrationEnd":"2026-09-17T23:59:59.999Z","status":"ONGOING","allowRegistration":true,"allowCancellation":true,"requireActivityRegistration":false,"requireAttendance":true,"automaticCertificate":true,"minimumAttendancePercentage":75,"certificateHours":3,"isPaid":false,"priceCents":null,"minPriceCents":null,"maxPriceCents":null,"institutionId":null,"organizerId":"cmtucfaef0002mc8cpzkogbeb","deletedAt":null,"createdAt":"2026-09-11T21:40:48.603Z","updatedAt":"2026-09-15T13:45:19.766Z","institution":null,"organizer":{"id":"cmtucfaef0002mc8cpzkogbeb","name":"Administrador Demo"},"_count":{"activities":1,"registrations":132}},{"id":"cmtxhb2zz007dfsibhds1jkoh","name":"SAVET QUARTA_FEIRA","slug":"savet-quarta-feira","shortDescription":"Quarta feira","description":"...","bannerUrl":"https://acadeconnect-backend.onrender.com/uploads/31c5b5646fe1850031e34b3d787952a2.jpg","startDate":"2026-09-16T00:00:00.000Z","endDate":"2026-09-16T00:00:00.000Z","startTime":"19:00","location":"Anfiteatro","address":"Unidade Educacional Anhanguera-Leme","modality":"PRESENCIAL","category":"Semana academia da veterinária","capacity":500,"registrationStart":"2026-09-11T00:00:00.000Z","registrationEnd":"2026-09-16T23:59:59.999Z","status":"ONGOING","allowRegistration":true,"allowCancellation":true,"requireActivityRegistration":false,"requireAttendance":true,"automaticCertificate":true,"minimumAttendancePercentage":75,"certificateHours":3,"isPaid":false,"priceCents":null,"minPriceCents":null,"maxPriceCents":null,"institutionId":null,"organizerId":"cmtucfaef0002mc8cpzkogbeb","deletedAt":null,"createdAt":"2026-09-11T21:39:12.239Z","updatedAt":"2026-09-15T13:44:17.831Z","institution":null,"organizer":{"id":"cmtucfaef0002mc8cpzkogbeb","name":"Administrador Demo"},"_count":{"activities":1,"registrations":129}},{"id":"cmtxh98x50079fsib87xshnwj","name":"SAVET TERÇA_FEIRA","slug":"savet-terca-feira","shortDescription":"Terça feira","description":"...","bannerUrl":"https://acadeconnect-backend.onrender.com/uploads/5a9a31f0a6a2abadc59bb4484d0ecb70.jpg","startDate":"2026-09-15T00:00:00.000Z","endDate":"2026-09-15T00:00:00.000Z","startTime":"19:00","location":"Anfiteatro","address":"Unidade Educacional Anhanguera- Leme","modality":"PRESENCIAL","category":"Semana academia da veterinária","capacity":500,"registrationStart":"2026-09-11T00:00:00.000Z","registrationEnd":"2026-09-15T23:59:59.999Z","status":"CLOSED","allowRegistration":true,"allowCancellation":true,"requireActivityRegistration":false,"requireAttendance":true,"automaticCertificate":true,"minimumAttendancePercentage":100,"certificateHours":3,"isPaid":false,"priceCents":null,"minPriceCents":null,"maxPriceCents":null,"institutionId":null,"organizerId":"cmtucfaef0002mc8cpzkogbeb","deletedAt":null,"createdAt":"2026-09-11T21:37:46.601Z","updatedAt":"2026-09-16T10:09:54.693Z","institution":null,"organizer":{"id":"cmtucfaef0002mc8cpzkogbeb","name":"Administrador Demo"},"_count":{"activities":1,"registrations":142}},{"id":"cmtxalett001524ve6y5hh8c7","name":"SAVET SEGUNDA_FEIRA","slug":"savet-segunda-feira","shortDescription":"Segunda feira","description":"...","bannerUrl":"https://acadeconnect-backend.onrender.com/uploads/1d3765dc8b65caef711a1f03f06aa4c7.jpg","startDate":"2026-09-14T00:00:00.000Z","endDate":"2026-09-16T00:00:00.000Z","startTime":"00:00","location":"Anfiteatro","address":"Faculdade educacional Anhanguera- Leme","modality":"PRESENCIAL","category":"Semana academia da veterinária","capacity":500,"registrationStart":"2026-09-11T00:00:00.000Z","registrationEnd":"2026-09-15T23:59:59.999Z","status":"CLOSED","allowRegistration":true,"allowCancellation":true,"requireActivityRegistration":false,"requireAttendance":true,"automaticCertificate":true,"minimumAttendancePercentage":75,"certificateHours":3,"isPaid":false,"priceCents":null,"minPriceCents":null,"maxPriceCents":null,"institutionId":null,"organizerId":"cmtucfaef0002mc8cpzkogbeb","deletedAt":null,"createdAt":"2026-09-11T18:31:16.818Z","updatedAt":"2026-09-15T18:54:08.554Z","institution":null,"organizer":{"id":"cmtucfaef0002mc8cpzkogbeb","name":"Administrador Demo"},"_count":{"activities":1,"registrations":140}}]},"meta":{"page":1,"limit":12,"total":7,"pages":1}}
+\ No newline at end of file
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/scripts/test-corrections-v94.mjs acade/backend/scripts/test-corrections-v94.mjs
+--- acade_orig/backend/scripts/test-corrections-v94.mjs	1970-01-01 00:00:00.000000000 +0000
++++ acade/backend/scripts/test-corrections-v94.mjs	2026-09-16 12:56:31.140724983 +0000
+@@ -0,0 +1,362 @@
++/**
++ * V9.4 — Corrections test suite.
++ *
++ * Runs WITHOUT a database on purpose: it exercises the primitives that the
++ * correction touches (in-process cache single-flight, projection contract,
++ * response headers/ETag, query validation, payload size) against the real
++ * modules. Integration tests that need PostgreSQL are listed as NOT EXECUTED
++ * in RELATORIO_FINAL_AUDITORIA.md.
++ *
++ * Run: node scripts/test-corrections-v94.mjs
++ */
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import path from 'node:path';
++import zlib from 'node:zlib';
++import http from 'node:http';
++import { fileURLToPath } from 'node:url';
++import express from 'express';
++
++import { cacheWrap, invalidate, cacheStats } from '../src/utils/cache.js';
++import {
++  PUBLIC_EVENT_LIST_SELECT,
++  STAFF_EVENT_LIST_SELECT,
++  eventListSelectFor,
++} from '../src/utils/eventProjection.js';
++import { apiResponse } from '../src/utils/apiResponse.js';
++import { eventSchemas } from '../src/validations/schemas.js';
++
++const __dirname = path.dirname(fileURLToPath(import.meta.url));
++const FIXTURE = path.join(__dirname, 'fixtures', 'events_list_limit12.prod.json');
++
++let pass = 0;
++let fail = 0;
++const results = [];
++function check(name, fn) {
++  return Promise.resolve()
++    .then(fn)
++    .then(() => {
++      pass += 1;
++      results.push(`  PASS  ${name}`);
++    })
++    .catch((err) => {
++      fail += 1;
++      results.push(`  FAIL  ${name}\n        ${err.message}`);
++    });
++}
++
++// ---------------------------------------------------------------------------
++// 1. Single-flight: N identical concurrent cache misses => 1 producer call.
++// ---------------------------------------------------------------------------
++await check('single-flight: 100 concurrent identical requests => 1 DB query', async () => {
++  invalidate();
++  let calls = 0;
++  const producer = () =>
++    new Promise((resolve) => {
++      calls += 1;
++      setTimeout(() => resolve({ rows: [1, 2, 3] }), 25);
++    });
++
++  const outputs = await Promise.all(
++    Array.from({ length: 100 }, () => cacheWrap('list:sf:test', 5000, producer))
++  );
++
++  assert.equal(calls, 1, `expected exactly 1 producer call, got ${calls}`);
++  assert.equal(outputs.length, 100);
++  const first = outputs[0];
++  assert.ok(outputs.every((o) => o === first), 'all callers must share the same object');
++});
++
++await check('cache hit: a later identical request does not call the producer again', async () => {
++  let calls = 0;
++  const producer = async () => {
++    calls += 1;
++    return { n: calls };
++  };
++  const a = await cacheWrap('list:hit:test', 5000, producer);
++  const b = await cacheWrap('list:hit:test', 5000, producer);
++  assert.equal(calls, 1);
++  assert.equal(a, b);
++});
++
++await check('cache key isolation: public vs staff and filters are distinct entries', async () => {
++  invalidate();
++  let calls = 0;
++  const producer = async (tag) => {
++    calls += 1;
++    return { tag };
++  };
++  const pub = await cacheWrap('events:list:public:1:12:::::recent', 5000, () => producer('pub'));
++  const staff = await cacheWrap('events:list:staff:1:12:::::recent', 5000, () => producer('staff'));
++  const limit3 = await cacheWrap('events:list:public:1:3:::::recent', 5000, () => producer('limit3'));
++  assert.equal(calls, 3, 'distinct keys must not share a cache entry');
++  assert.equal(pub.tag, 'pub');
++  assert.equal(staff.tag, 'staff');
++  assert.equal(limit3.tag, 'limit3');
++});
++
++await check('invalidate(prefix) drops every variant of the listing', async () => {
++  invalidate();
++  await cacheWrap('events:list:public:1:9:::::recent', 5000, async () => 1);
++  await cacheWrap('events:list:staff:1:200:::::recent', 5000, async () => 2);
++  await cacheWrap('events:one:slug', 5000, async () => 3);
++  invalidate('events:');
++  const stats = cacheStats();
++  assert.equal(stats.size, 0, `expected empty cache after invalidate, size=${stats.size}`);
++});
++
++// ---------------------------------------------------------------------------
++// 2. Projection contract (no field an existing screen reads may be missing).
++// ---------------------------------------------------------------------------
++const PUBLIC_CONTRACT = [
++  'id',
++  'name',
++  'slug',
++  'shortDescription',
++  'bannerUrl',
++  'startDate',
++  'endDate',
++  'registrationEnd',
++  'status',
++  'location',
++  'category',
++  '_count.activities',
++];
++
++await check('public projection exposes every field the listing UI reads', () => {
++  for (const field of PUBLIC_CONTRACT) {
++    if (field === '_count.activities') {
++      assert.equal(PUBLIC_EVENT_LIST_SELECT._count?.select?.activities, true);
++    } else {
++      assert.equal(PUBLIC_EVENT_LIST_SELECT[field], true, `missing ${field}`);
++    }
++  }
++});
++
++await check('public projection does NOT transport the unused heavy fields', () => {
++  const forbidden = [
++    'description',
++    'address',
++    'registrationStart',
++    'allowCancellation',
++    'allowRegistration',
++    'requireAttendance',
++    'requireActivityRegistration',
++    'automaticCertificate',
++    'minimumAttendancePercentage',
++    'certificateHours',
++    'isPaid',
++    'priceCents',
++    'minPriceCents',
++    'maxPriceCents',
++    'deletedAt',
++    'createdAt',
++    'updatedAt',
++    'institution',
++    'organizer',
++    'institutionId',
++    'organizerId',
++    'capacity',
++    'modality',
++    'startTime',
++  ];
++  for (const f of forbidden) {
++    assert.ok(!(f in PUBLIC_EVENT_LIST_SELECT), `field ${f} must not be selected`);
++  }
++  assert.equal(PUBLIC_EVENT_LIST_SELECT._count.select.registrations, undefined);
++});
++
++await check('staff projection is a strict superset (registrations + startTime)', () => {
++  for (const field of PUBLIC_CONTRACT) {
++    if (field === '_count.activities') continue;
++    assert.equal(STAFF_EVENT_LIST_SELECT[field], true, `staff missing ${field}`);
++  }
++  assert.equal(STAFF_EVENT_LIST_SELECT.startTime, true);
++  assert.equal(STAFF_EVENT_LIST_SELECT._count.select.activities, true);
++  assert.equal(STAFF_EVENT_LIST_SELECT._count.select.registrations, true);
++});
++
++await check('eventListSelectFor picks the right projection per role', () => {
++  assert.equal(eventListSelectFor({ staff: false }), PUBLIC_EVENT_LIST_SELECT);
++  assert.equal(eventListSelectFor({ staff: true }), STAFF_EVENT_LIST_SELECT);
++});
++
++// ---------------------------------------------------------------------------
++// 3. Payload size — real production response (7 events) projected with the
++//    new public select. BEFORE is the byte count actually served in production.
++// ---------------------------------------------------------------------------
++function projectPublic(e) {
++  return {
++    id: e.id,
++    name: e.name,
++    slug: e.slug,
++    shortDescription: e.shortDescription,
++    bannerUrl: e.bannerUrl,
++    startDate: e.startDate,
++    endDate: e.endDate,
++    registrationEnd: e.registrationEnd,
++    status: e.status,
++    location: e.location,
++    category: e.category,
++    _count: { activities: e._count?.activities ?? 0 },
++  };
++}
++
++let payload = null;
++await check('payload: projected listing is materially smaller (same real events)', () => {
++  const raw = fs.readFileSync(FIXTURE, 'utf8');
++  const parsed = JSON.parse(raw);
++  const beforeBytes = Buffer.byteLength(raw, 'utf8');
++
++  const afterBody = {
++    ...parsed,
++    data: { events: parsed.data.events.map(projectPublic) },
++  };
++  const after = JSON.stringify(afterBody);
++  const afterBytes = Buffer.byteLength(after, 'utf8');
++
++  const beforeGzip = zlib.gzipSync(Buffer.from(raw)).length;
++  const afterGzip = zlib.gzipSync(Buffer.from(after)).length;
++
++  const reduction = (1 - afterBytes / beforeBytes) * 100;
++  const gzipReduction = (1 - afterGzip / beforeGzip) * 100;
++
++  assert.ok(afterBytes < beforeBytes, 'projected payload must be smaller');
++  assert.ok(reduction >= 55, `expected >=55% raw reduction, got ${reduction.toFixed(1)}%`);
++
++  // The projected body must not leak the heavy fields anywhere.
++  assert.ok(!after.includes('"description"'), 'description leaked into listing');
++  assert.ok(!after.includes('"address"'), 'address leaked into listing');
++  assert.ok(!after.includes('"deletedAt"'), 'deletedAt leaked into listing');
++  assert.ok(!after.includes('"institution"'), 'institution leaked into listing');
++
++  payload = { beforeBytes, afterBytes, beforeGzip, afterGzip, reduction, gzipReduction, events: parsed.data.events.length };
++});
++
++// ---------------------------------------------------------------------------
++// 4. Query validation / pagination caps.
++// ---------------------------------------------------------------------------
++const listSchema = eventSchemas.listQuery.query;
++const v = (q) => listSchema.validate(q, { abortEarly: false, convert: true, stripUnknown: true });
++
++await check('pagination: limit=999999 is rejected', () => {
++  const { error } = v({ limit: '999999' });
++  assert.ok(error, 'expected a validation error for limit=999999');
++});
++
++await check('pagination: limit=0 and non-numeric limit are rejected', () => {
++  assert.ok(v({ limit: '0' }).error, 'limit=0 must fail');
++  assert.ok(v({ limit: 'abc' }).error, 'limit=abc must fail');
++});
++
++await check('pagination: valid limit/page/sort are converted to numbers', () => {
++  const { error, value } = v({ limit: '9', page: '3', sort: 'closest' });
++  assert.equal(error, undefined);
++  assert.equal(value.limit, 9);
++  assert.equal(value.page, 3);
++  assert.equal(value.sort, 'closest');
++});
++
++await check('filters: invalid status/category values are rejected or stripped', () => {
++  assert.ok(v({ status: 'HACKED' }).error, 'unknown status must fail');
++  const { value } = v({ category: 'Palestra', junk: '<script>' });
++  assert.equal(value.category, 'Palestra');
++  assert.equal(value.junk, undefined, 'unknown params must be stripped');
++});
++
++// ---------------------------------------------------------------------------
++// 5. apiResponse Cache-Control semantics + express ETag/304.
++// ---------------------------------------------------------------------------
++function fakeRes() {
++  return {
++    headers: {},
++    setHeader(k, val) {
++      this.headers[k.toLowerCase()] = val;
++    },
++    status(code) {
++      this.code = code;
++      return this;
++    },
++    json(body) {
++      this.body = body;
++      return this;
++    },
++  };
++}
++
++await check('apiResponse: cacheSeconds=15 emits the public Cache-Control', () => {
++  const res = fakeRes();
++  apiResponse(res, { data: {}, cacheSeconds: 15 });
++  assert.equal(res.headers['cache-control'], 'public, max-age=15, stale-while-revalidate=60');
++});
++
++await check('apiResponse: cacheSeconds=0 emits NO Cache-Control (private data safe)', () => {
++  const res = fakeRes();
++  apiResponse(res, { data: {}, cacheSeconds: 0 });
++  assert.equal(res.headers['cache-control'], undefined);
++});
++
++await check('express: Cache-Control + weak ETag => 304 revalidation works', async () => {
++  const app = express();
++  app.set('etag', 'weak');
++  app.get('/events', (req, res) => {
++    res.vary('Authorization');
++    res.vary('Cookie');
++    apiResponse(res, { data: { events: [{ id: 'x', name: 'A' }] }, cacheSeconds: 15 });
++  });
++  const server = await new Promise((resolve) => {
++    const s = app.listen(0, () => resolve(s));
++  });
++  const port = server.address().port;
++  // NOTE: Node's global fetch (undici) mangles the If-None-Match ETag value in
++  // this sandbox, so the raw http client is used to send it verbatim.
++  const get = (headers) =>
++    new Promise((resolve, reject) => {
++      http
++        .get({ port, path: '/events', headers }, (r) => {
++          r.resume();
++          resolve({ status: r.statusCode, headers: r.headers });
++        })
++        .on('error', reject);
++    });
++
++  try {
++    const first = await get({});
++    assert.equal(first.status, 200);
++    const etag = first.headers.etag;
++    const cc = first.headers['cache-control'];
++    const vary = first.headers.vary || '';
++    assert.ok(etag, 'ETag must be present');
++    assert.equal(cc, 'public, max-age=15, stale-while-revalidate=60');
++    assert.ok(vary.includes('Authorization'), `Vary must include Authorization, got "${vary}"`);
++
++    const second = await get({ 'If-None-Match': etag });
++    assert.equal(second.status, 304, 'a matching If-None-Match must return 304');
++    assert.equal(second.headers['cache-control'], cc, '304 must keep Cache-Control');
++  } finally {
++    server.close();
++  }
++});
++
++await check('authenticated-looking variant carries no public Cache-Control', () => {
++  const res = fakeRes();
++  // Staff listing path passes cacheSeconds=0 (see listEvents); detail of the
++  // contract: no public header means browser/CDN never store it.
++  apiResponse(res, { data: { events: [] }, cacheSeconds: 0 });
++  assert.equal(res.headers['cache-control'], undefined);
++});
++
++// ---------------------------------------------------------------------------
++// Summary
++// ---------------------------------------------------------------------------
++console.log('\n=== AcadeConnect V9.4 — correction tests ===\n');
++console.log(results.join('\n'));
++if (payload) {
++  console.log('\n--- Payload (GET /events?limit=12, 7 real production events) ---');
++  console.log(`  BEFORE: ${payload.beforeBytes} B raw / ${payload.beforeGzip} B gzip`);
++  console.log(`  AFTER : ${payload.afterBytes} B raw / ${payload.afterGzip} B gzip`);
++  console.log(`  raw reduction  : ${payload.reduction.toFixed(1)}%`);
++  console.log(`  gzip reduction : ${payload.gzipReduction.toFixed(1)}%`);
++}
++console.log(`\nTOTAL: ${pass} PASS / ${fail} FAIL\n`);
++process.exit(fail === 0 ? 0 : 1);
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/scripts/test-http-v94.mjs acade/backend/scripts/test-http-v94.mjs
+--- acade_orig/backend/scripts/test-http-v94.mjs	1970-01-01 00:00:00.000000000 +0000
++++ acade/backend/scripts/test-http-v94.mjs	2026-09-16 12:58:36.358742022 +0000
+@@ -0,0 +1,129 @@
++/**
++ * V9.4 — HTTP integration smoke test (no database required).
++ *
++ * Boots the REAL Express app and verifies, over real HTTP requests:
++ *   1. every route (including V9.2 features) is registered;
++ *   2. GET /events query validation runs BEFORE the database: an oversized or
++ *      malformed `limit` is rejected with 422 without touching PostgreSQL;
++ *   3. a valid anonymous listing reaches the controller (fails later at the DB
++ *      layer only because this sandbox has no PostgreSQL — proving the request
++ *      was accepted, not rejected by validation).
++ *
++ * Run: node scripts/test-http-v94.mjs
++ */
++import http from 'node:http';
++
++// Point Prisma at a dead port: app import must not need a live DB, and any
++// request that reaches the data layer fails with a connection error.
++process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://x:x@127.0.0.1:5433/none';
++process.env.NODE_ENV = 'test';
++process.env.JWT_SECRET = 'test-secret';
++process.env.RATE_LIMIT_MAX = '100000';
++process.env.RATE_LIMIT_ANON_MAX = '100000';
++
++const { createApp } = await import('../src/app.js');
++
++const app = createApp();
++const server = await new Promise((resolve) => {
++  const s = app.listen(0, () => resolve(s));
++});
++const port = server.address().port;
++
++const get = (path) =>
++  new Promise((resolve, reject) => {
++    http
++      .get({ port, path }, (r) => {
++        const chunks = [];
++        r.on('data', (c) => chunks.push(c));
++        r.on('end', () => {
++          let json = null;
++          try {
++            json = JSON.parse(Buffer.concat(chunks).toString('utf8'));
++          } catch {
++            /* non-JSON */
++          }
++          resolve({ status: r.statusCode, headers: r.headers, json });
++        });
++      })
++      .on('error', reject);
++  });
++
++let pass = 0;
++let fail = 0;
++const results = [];
++async function check(name, fn) {
++  try {
++    await fn();
++    pass += 1;
++    results.push(`  PASS  ${name}`);
++  } catch (err) {
++    fail += 1;
++    results.push(`  FAIL  ${name}\n        ${err.message}`);
++  }
++}
++const assert = (cond, msg) => {
++  if (!cond) throw new Error(msg || 'assertion failed');
++};
++
++// --- Route registration (probed over HTTP; a missing route yields 404) ------
++const post = (path, headers = {}) =>
++  new Promise((resolve, reject) => {
++    const req = http.request({ port, path, method: 'POST', headers }, (r) => {
++      r.resume();
++      resolve({ status: r.statusCode });
++    });
++    req.on('error', reject);
++    req.end();
++  });
++
++await check('V9.2 protected routes are registered (401 without token, not 404)', async () => {
++  const b = await post('/api/admin/notifications/broadcast');
++  assert(b.status === 401, `broadcast expected 401, got ${b.status}`);
++  const c = await post('/api/certificates/cancel-present/evt-1');
++  assert(c.status === 401, `cancel-present expected 401, got ${c.status}`);
++});
++
++await check('unknown routes still return 404', async () => {
++  const r = await get('/api/definitely-not-a-route');
++  assert(r.status === 404, `expected 404, got ${r.status}`);
++});
++
++// --- Validation runs before the DB -----------------------------------------
++await check('GET /events?limit=999999 => 422 (rejected before PostgreSQL)', async () => {
++  const r = await get('/api/events?limit=999999');
++  assert(r.status === 422, `expected 422, got ${r.status}`);
++  assert(r.json?.success === false, 'expected a failure envelope');
++});
++
++await check('GET /events?limit=abc => 422', async () => {
++  const r = await get('/api/events?limit=abc');
++  assert(r.status === 422, `expected 422, got ${r.status}`);
++});
++
++await check('GET /events?status=HACKED => 422', async () => {
++  const r = await get('/api/events?status=HACKED');
++  assert(r.status === 422, `expected 422, got ${r.status}`);
++});
++
++await check('GET /events?limit=9 (valid) is accepted and reaches the controller', async () => {
++  const r = await get('/api/events?limit=9');
++  // No DB in this sandbox => the data layer fails (500). What matters is that
++  // validation did NOT reject it (not 422/400).
++  assert(r.status !== 422 && r.status !== 400, `validation wrongly rejected a valid query (${r.status})`);
++});
++
++await check('junk query params are stripped, not forwarded to Prisma', async () => {
++  const r = await get('/api/events?limit=9&evil[$ne]=1');
++  assert(r.status !== 422 && r.status !== 400, `junk params broke validation (${r.status})`);
++});
++
++await check('health endpoint responds without database', async () => {
++  const r = await get('/api/health');
++  assert(r.status === 200, `expected 200, got ${r.status}`);
++});
++
++server.close();
++console.log('\n=== AcadeConnect V9.4 — HTTP smoke ===\n');
++console.log(results.join('\n'));
++console.log(`\nTOTAL: ${pass} PASS / ${fail} FAIL\n`);
++process.exit(fail === 0 ? 0 : 1);
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/scripts/test-qr-content.mjs acade/backend/scripts/test-qr-content.mjs
+--- acade_orig/backend/scripts/test-qr-content.mjs	1970-01-01 00:00:00.000000000 +0000
++++ acade/backend/scripts/test-qr-content.mjs	2026-09-16 12:59:26.879555864 +0000
+@@ -0,0 +1,111 @@
++/**
++ * V9.4 — QR content test (no database required).
++ *
++ * Decodes the PNG generated by the backend and asserts the EXACT payload
++ * embedded in the QR:
++ *   - attendance QR encodes the opaque attendance token;
++ *   - PIX QR encodes the EMV "copia e cola" payload;
++ *   - the two are never confused (attendance token must NOT contain the EMV
++ *     marker, and the PIX payload must NOT be a raw token).
++ *
++ * This tests the part that breaks in production when QR and PIX get mixed up.
++ * The DB-dependent parts (matching the token to the right event/user, duplicate
++ * scan) are integration tests, listed as NOT EXECUTED in the report.
++ *
++ * Run: node scripts/test-qr-content.mjs
++ */
++import assert from 'node:assert/strict';
++import JSQR from 'jsqr';
++import { PNG } from 'pngjs';
++
++import { generateQrDataUrl } from '../src/utils/qr.js';
++import { buildPixPayload, crc16 } from '../src/utils/pix.js';
++
++let pass = 0;
++let fail = 0;
++function check(name, fn) {
++  try {
++    fn();
++    pass += 1;
++    console.log(`PASS  ${name}`);
++  } catch (err) {
++    fail += 1;
++    console.log(`FAIL  ${name}\n      ${err.message}`);
++  }
++}
++
++/** Decode the first frame of a data:image/png;base64,... URL. */
++function decodeDataUrl(dataUrl) {
++  const base64 = dataUrl.split(',')[1];
++  const png = PNG.sync.read(Buffer.from(base64, 'base64'));
++  const result = JSQR(new Uint8ClampedArray(png.data), png.width, png.height);
++  assert.ok(result, 'QR could not be decoded');
++  return result.data;
++}
++
++const dataUrl = await generateQrDataUrl('att_test');
++
++check('attendance QR is a valid PNG data URL', () => {
++  assert.ok(dataUrl.startsWith('data:image/png;base64,'));
++});
++
++check('attendance QR decodes to the exact opaque token (no prefix, no mutation)', () => {
++  assert.ok(dataUrl.length > 100);
++  const decoded = decodeDataUrl(dataUrl);
++  assert.equal(decoded, 'att_test');
++});
++
++check('attendance QR round-trips a realistic token byte-for-byte', async () => {
++  const token = 'qr_9d2f4c1a8e7b3f60a5c4e2d1b0a9f8e7d6c5b4a3';
++  const url = generateQrDataUrl(token);
++  const decoded = decodeDataUrl(await url);
++  assert.equal(decoded, token);
++});
++
++check('PIX QR encodes the full EMV payload (QR == copia e cola)', async () => {
++  const payload = buildPixPayload({
++    key: 'mustangs@atletica.com',
++    receiverName: 'Mustangs Atletica',
++    city: 'SAO PAULO',
++    amountCents: 5000,
++    txid: 'EVENTO123',
++  });
++  const url = await generateQrDataUrl(payload);
++  const decoded = decodeDataUrl(url);
++  assert.equal(decoded, payload, 'QR content must equal the PIX copia-e-cola payload');
++});
++
++check('PIX payload carries a valid CRC and the configured amount', () => {
++  const payload = buildPixPayload({
++    key: 'mustangs@atletica.com',
++    receiverName: 'Mustangs Atletica',
++    city: 'SAO PAULO',
++    amountCents: 5000,
++    txid: 'EVENTO123',
++  });
++  assert.ok(payload.includes('5303986'), 'currency must be BRL (986)');
++  assert.ok(payload.includes('540550.00'), 'amount 5000 cents must encode as 50.00');
++  assert.ok(payload.includes('br.gov.bcb.pix'), 'PIX GUI must be present');
++  const withoutCrc = payload.slice(0, -4);
++  assert.equal(crc16(withoutCrc), payload.slice(-4), 'CRC must validate');
++});
++
++check('attendance QR and PIX QR are not confusable', async () => {
++  const token = 'qr_opaque_token_123';
++  const pix = buildPixPayload({
++    key: 'mustangs@atletica.com',
++    receiverName: 'Mustangs Atletica',
++    city: 'SAO PAULO',
++    amountCents: 100,
++    txid: 'X1',
++  });
++  const decodedToken = decodeDataUrl(await generateQrDataUrl(token));
++  const decodedPix = decodeDataUrl(await generateQrDataUrl(pix));
++
++  assert.ok(!decodedToken.includes('br.gov.bcb.pix'), 'attendance QR must not look like PIX');
++  assert.ok(!decodedPix.startsWith('qr_') && !decodedPix.startsWith('att_'), 'PIX QR must not be a raw token');
++  assert.notEqual(decodedToken, decodedPix);
++});
++
++console.log(`\nTOTAL: ${pass} PASS / ${fail} FAIL\n`);
++process.exit(fail === 0 ? 0 : 1);
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/scripts/validate-cache-live.mjs acade/backend/scripts/validate-cache-live.mjs
+--- acade_orig/backend/scripts/validate-cache-live.mjs	1970-01-01 00:00:00.000000000 +0000
++++ acade/backend/scripts/validate-cache-live.mjs	2026-09-16 12:56:42.744911864 +0000
+@@ -0,0 +1,90 @@
++/**
++ * V9.4 — Live (read-only) cache/ETag validation against production.
++ *
++ * Deliberately light: a handful of sequential GETs against public endpoints
++ * only. No auth, no writes, no high-concurrency run (the task forbids loading
++ * production with 250/500). It records what the origin actually returns
++ * TODAY, so the "before" side of the report is measured, not assumed.
++ *
++ * Run: node scripts/validate-cache-live.mjs [base]
++ */
++import http from 'node:http';
++import https from 'node:https';
++import zlib from 'node:zlib';
++
++const BASE = process.argv[2] || 'https://acadeconnect-backend.onrender.com/api';
++
++function request(url, headers = {}) {
++  return new Promise((resolve, reject) => {
++    const mod = url.startsWith('https') ? https : http;
++    const started = process.hrtime.bigint();
++    const req = mod.get(url, { headers }, (res) => {
++      const chunks = [];
++      res.on('data', (c) => chunks.push(c));
++      res.on('end', () => {
++        const raw = Buffer.concat(chunks);
++        const ms = Number(process.hrtime.bigint() - started) / 1e6;
++        let body = raw;
++        if ((res.headers['content-encoding'] || '').includes('gzip')) body = zlib.gunzipSync(raw);
++        resolve({ status: res.statusCode, headers: res.headers, body, wireBytes: raw.length, ms });
++      });
++    });
++    req.on('error', reject);
++    req.setTimeout(30000, () => req.destroy(new Error('timeout')));
++  });
++}
++
++const pick = (e) => ({
++  id: e.id,
++  name: e.name,
++  slug: e.slug,
++  shortDescription: e.shortDescription,
++  bannerUrl: e.bannerUrl,
++  startDate: e.startDate,
++  endDate: e.endDate,
++  registrationEnd: e.registrationEnd,
++  status: e.status,
++  location: e.location,
++  category: e.category,
++  _count: { activities: e._count?.activities ?? 0 },
++});
++
++console.log(`\n=== Live validation — ${BASE} ===\n`);
++
++const list = await request(`${BASE}/events?limit=12`, { 'Accept-Encoding': 'gzip' });
++console.log(`GET /events?limit=12`);
++console.log(`  status            : ${list.status}`);
++console.log(`  cache-control     : ${list.headers['cache-control'] ?? '(absent)'}`);
++console.log(`  etag              : ${list.headers.etag ?? '(absent)'}`);
++console.log(`  content-encoding  : ${list.headers['content-encoding'] ?? 'identity'}`);
++console.log(`  wire bytes        : ${list.wireBytes}`);
++console.log(`  decoded bytes     : ${list.body.length}`);
++console.log(`  time              : ${list.ms.toFixed(0)} ms`);
++
++const parsed = JSON.parse(list.body.toString('utf8'));
++const projected = JSON.stringify({ ...parsed, data: { events: parsed.data.events.map(pick) } });
++console.log(`\n  events            : ${parsed.data.events.length}`);
++console.log(`  BEFORE (real)     : ${list.body.length} B`);
++console.log(`  AFTER (projected) : ${Buffer.byteLength(projected)} B`);
++console.log(
++  `  reduction         : ${(
++    (1 - Buffer.byteLength(projected) / list.body.length) *
++    100
++  ).toFixed(1)}%`
++);
++
++// Conditional request => expect 304 and an empty body.
++const cond = await request(`${BASE}/events?limit=12`, { 'If-None-Match': list.headers.etag, 'Accept-Encoding': 'gzip' });
++console.log(`\nGET /events?limit=12  (If-None-Match)`);
++console.log(`  status            : ${cond.status} ${cond.status === 304 ? '(revalidated)' : ''}`);
++console.log(`  cache-control     : ${cond.headers['cache-control'] ?? '(absent)'}`);
++console.log(`  body bytes        : ${cond.body.length}`);
++
++// Filtered / paginated variants must be their own cache entries.
++for (const q of ['/events?limit=3', '/events?status=OPEN', '/events?limit=9&sort=closest']) {
++  const r = await request(`${BASE}${q}`, { 'Accept-Encoding': 'gzip' });
++  console.log(`\nGET ${q}`);
++  console.log(`  status=${r.status} bytes=${r.body.length} etag=${r.headers.etag ?? '(none)'} cache-control=${r.headers['cache-control'] ?? '(absent)'}`);
++}
++
++console.log('');
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/controllers/adminController.js acade/backend/src/controllers/adminController.js
+--- acade_orig/backend/src/controllers/adminController.js	2026-09-16 12:37:08.000000000 +0000
++++ acade/backend/src/controllers/adminController.js	2026-09-16 12:57:46.793943585 +0000
+@@ -8,6 +8,7 @@
+ import { invalidateUserCache } from '../middlewares/auth.js';
+ import { broadcastToAllUsers } from '../services/notificationService.js';
+ import { cacheWrap, invalidate } from '../utils/cache.js';
++import { parsePagination, paginationMeta } from '../utils/pagination.js';
+ import { env } from '../config/env.js';
+ 
+ const DASHBOARD_CACHE_KEY = 'admin:dashboard';
+@@ -114,7 +115,8 @@
+ // ---------- User management (ADMIN) ----------
+ 
+ export const listUsers = asyncHandler(async (req, res) => {
+-  const { search, role, page = 1, limit = 20 } = req.query;
++  const { search, role } = req.query;
++  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 200 });
+   const where = { deletedAt: null };
+   if (role) where.role = role;
+   if (search) {
+@@ -130,14 +132,14 @@
+         _count: { select: { registrations: true, certificates: true } },
+       },
+       orderBy: { createdAt: 'desc' },
+-      skip: (Number(page) - 1) * Number(limit),
+-      take: Number(limit),
++      skip,
++      take,
+     }),
+   ]);
+   return apiResponse(res, {
+     message: 'Usuários.',
+     data: { users: users.map((u) => ({ ...u, avatarUrl: publicUrl(u.avatarUrl) })) },
+-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
++    meta: paginationMeta({ page, limit, total }),
+   });
+ });
+ 
+@@ -221,7 +223,8 @@
+ // ---------- Audit logs (ADMIN) ----------
+ 
+ export const listAuditLogs = asyncHandler(async (req, res) => {
+-  const { action, page = 1, limit = 20 } = req.query;
++  const { action } = req.query;
++  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 200 });
+   const where = {};
+   if (action) where.action = action;
+   const [total, logs] = await Promise.all([
+@@ -230,21 +233,24 @@
+       where,
+       include: { user: { select: { name: true, email: true } } },
+       orderBy: { createdAt: 'desc' },
+-      skip: (Number(page) - 1) * Number(limit),
+-      take: Number(limit),
++      skip,
++      take,
+     }),
+   ]);
+   return apiResponse(res, {
+     message: 'Logs de auditoria.',
+     data: { logs },
+-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
++    meta: paginationMeta({ page, limit, total }),
+   });
+ });
+ 
+ // ---------- Admin registrations list ----------
+ 
+ export const listAllRegistrations = asyncHandler(async (req, res) => {
+-  const { eventId, search, status, page = 1, limit = 20 } = req.query;
++  const { eventId, search, status } = req.query;
++  // The admin "ver inscritos" modal asks for limit=500, so this endpoint gets a
++  // higher ceiling than the other admin lists.
++  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 500 });
+   const where = {};
+   if (eventId) where.eventId = eventId;
+   if (status) where.status = status;
+@@ -267,14 +273,14 @@
+         _count: { select: { attendance: true, certificates: true } },
+       },
+       orderBy: { createdAt: 'desc' },
+-      skip: (Number(page) - 1) * Number(limit),
+-      take: Number(limit),
++      skip,
++      take,
+     }),
+   ]);
+   return apiResponse(res, {
+     message: 'Inscrições.',
+     data: { registrations },
+-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
++    meta: paginationMeta({ page, limit, total }),
+   });
+ });
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/controllers/attendanceController.js acade/backend/src/controllers/attendanceController.js
+--- acade_orig/backend/src/controllers/attendanceController.js	2026-09-16 12:30:16.000000000 +0000
++++ acade/backend/src/controllers/attendanceController.js	2026-09-16 12:57:40.245838103 +0000
+@@ -4,6 +4,7 @@
+ import { asyncHandler } from '../utils/asyncHandler.js';
+ import { registerAttendanceByQr, setManualAttendance, findRegistrationByScan } from '../services/attendanceService.js';
+ import { createAuditLog } from '../services/auditLogService.js';
++import { parsePagination, paginationMeta } from '../utils/pagination.js';
+ 
+ /**
+  * Operator scans a QR code (opaque token) + selects activity.
+@@ -275,7 +276,8 @@
+ });
+ 
+ export const listAllAttendance = asyncHandler(async (req, res) => {
+-  const { eventId, activityId, search, status, page = 1, limit = 20 } = req.query;
++  const { eventId, activityId, search, status } = req.query;
++  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 200 });
+   const where = {};
+   if (eventId) where.eventId = eventId;
+   if (activityId) where.activityId = activityId;
+@@ -294,13 +296,13 @@
+         registration: { select: { code: true } },
+       },
+       orderBy: { recordedAt: 'desc' },
+-      skip: (Number(page) - 1) * Number(limit),
+-      take: Number(limit),
++      skip,
++      take,
+     }),
+   ]);
+   return apiResponse(res, {
+     message: 'Presenças.',
+     data: { attendance },
+-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
++    meta: paginationMeta({ page, limit, total }),
+   });
+ });
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/controllers/certificateController.js acade/backend/src/controllers/certificateController.js
+--- acade_orig/backend/src/controllers/certificateController.js	2026-09-16 12:36:38.000000000 +0000
++++ acade/backend/src/controllers/certificateController.js	2026-09-16 12:57:50.802008147 +0000
+@@ -6,6 +6,7 @@
+ import { publicUrl } from '../config/multer.js';
+ import { issueEventCertificate, issueActivityCertificate, autoIssueCertificatesForEvent, correctCertificate as correctCertificateService, cancelCertificate as cancelCertificateService, cancelCertificatesForPresentParticipants } from '../services/certificateService.js';
+ import { createAuditLog } from '../services/auditLogService.js';
++import { parsePagination, paginationMeta } from '../utils/pagination.js';
+ import fs from 'node:fs';
+ import path from 'node:path';
+ 
+@@ -106,7 +107,8 @@
+ // ---------- Admin ----------
+ 
+ export const listCertificates = asyncHandler(async (req, res) => {
+-  const { search, eventId, status, page = 1, limit = 20 } = req.query;
++  const { search, eventId, status } = req.query;
++  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 200 });
+   const where = {};
+   if (eventId) where.eventId = eventId;
+   if (status) where.status = status;
+@@ -119,14 +121,14 @@
+       where,
+       include: { ...certInclude, user: { select: { id: true, name: true, email: true } }, registration: { select: { code: true } } },
+       orderBy: { issueDate: 'desc' },
+-      skip: (Number(page) - 1) * Number(limit),
+-      take: Number(limit),
++      skip,
++      take,
+     }),
+   ]);
+   return apiResponse(res, {
+     message: 'Certificados.',
+     data: { certificates: certificates.map((c) => ({ ...c, pdfUrl: c.pdfUrl ? `${env.apiUrl}/uploads/${c.pdfUrl}` : null })) },
+-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
++    meta: paginationMeta({ page, limit, total }),
+   });
+ });
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/controllers/eventController.js acade/backend/src/controllers/eventController.js
+--- acade_orig/backend/src/controllers/eventController.js	2026-09-16 12:36:22.000000000 +0000
++++ acade/backend/src/controllers/eventController.js	2026-09-16 12:54:20.114614870 +0000
+@@ -10,6 +10,7 @@
+ import { createNotifications } from '../services/notificationService.js';
+ import { autoIssueCertificatesForEvent } from '../services/certificateService.js';
+ import { cacheWrap, invalidate } from '../utils/cache.js';
++import { eventListSelectFor } from '../utils/eventProjection.js';
+ import { env } from '../config/env.js';
+ 
+ // Public event listings/details are read constantly and change rarely: a short
+@@ -17,6 +18,24 @@
+ // traffic. Invalidated explicitly on every write.
+ const EVENTS_CACHE_PREFIX = 'events:';
+ 
++// Pagination guardrails. A caller must never be able to ask for 999999 rows and
++// force the instance to serialize/compress an unbounded payload. Public reads
++// are capped low; staff screens legitimately page through up to 200 at a time.
++const EVENTS_LIST_DEFAULT_LIMIT = 12;
++const EVENTS_LIST_MAX_LIMIT = Number(process.env.EVENTS_LIST_MAX_LIMIT || 60);
++const EVENTS_LIST_MAX_LIMIT_STAFF = Number(process.env.EVENTS_LIST_MAX_LIMIT_STAFF || 200);
++
++/** Clamp a positive integer query param to [1, max], falling back on garbage. */
++function toPositiveInt(value, fallback, max) {
++  const n = Number.parseInt(value, 10);
++  if (!Number.isFinite(n) || n < 1) return fallback;
++  return Math.min(n, max);
++}
++
++function isStaff(user) {
++  return !!user && (user.role === 'ADMIN' || user.role === 'ORGANIZER');
++}
++
+ const eventInclude = (includeStats = false) => ({
+   institution: { select: { id: true, name: true } },
+   organizer: { select: { id: true, name: true } },
+@@ -74,8 +93,6 @@
+ 
+ export const listEvents = asyncHandler(async (req, res) => {
+   const {
+-    page = 1,
+-    limit = 12,
+     search = '',
+     category,
+     modality,
+@@ -85,6 +102,14 @@
+     sort = 'recent',
+   } = req.query;
+ 
++  // The projection depends on the caller: anonymous visitors get the minimum
++  // contract, staff get the superset their screens use. This is decided from the
++  // verified token (optionalAuthenticate), never from a client-supplied flag.
++  const staff = isStaff(req.user);
++  const maxLimit = staff ? EVENTS_LIST_MAX_LIMIT_STAFF : EVENTS_LIST_MAX_LIMIT;
++  const pageNum = toPositiveInt(req.query.page, 1, Number.MAX_SAFE_INTEGER);
++  const limitNum = toPositiveInt(req.query.limit, EVENTS_LIST_DEFAULT_LIMIT, maxLimit);
++
+   const where = { deletedAt: null };
+   if (search) {
+     where.OR = [
+@@ -114,45 +139,51 @@
+         ? { registrations: { _count: 'desc' } }
+         : { createdAt: 'desc' };
+ 
+-  // Search results are not cached (high cardinality); unfiltered listing is.
++  // Search results are not cached in-process (high cardinality); unfiltered
++  // listing is. The variant (public/staff) is part of the key so the two
++  // projections can never be served for one another.
+   const runQuery = async () => {
+     const [total, events] = await Promise.all([
+       prisma.event.count({ where }),
+       prisma.event.findMany({
+         where,
+         orderBy,
+-        skip: (Number(page) - 1) * Number(limit),
+-        take: Number(limit),
+-        include: eventInclude(),
++        skip: (pageNum - 1) * limitNum,
++        take: limitNum,
++        select: eventListSelectFor({ staff }),
+       }),
+     ]);
+     return {
+       events: events.map(enrichEvent),
+       meta: {
+-        page: Number(page),
+-        limit: Number(limit),
++        page: pageNum,
++        limit: limitNum,
+         total,
+-        pages: Math.ceil(total / Number(limit)),
++        pages: Math.ceil(total / limitNum),
+       },
+     };
+   };
+ 
++  const variant = staff ? 'staff' : 'public';
+   const payload = search
+     ? await runQuery()
+     : await cacheWrap(
+-        `${EVENTS_CACHE_PREFIX}list:${page}:${limit}:${category || ''}:${modality || ''}:${status || ''}:${location || ''}:${date || ''}:${sort}`,
++        `${EVENTS_CACHE_PREFIX}list:${variant}:${pageNum}:${limitNum}:${category || ''}:${modality || ''}:${status || ''}:${location || ''}:${date || ''}:${sort}`,
+         env.publicCacheTtlMs,
+         runQuery
+       );
+ 
+-  // Public, low-write data: mark it cacheable so browsers/CDN answer repeat
+-  // requests without hitting the origin. Search results are per-query and not
+-  // cached, so they keep the default (no Cache-Control).
++  // `Vary` makes browser/CDN caches key on the credentials: a cached anonymous
++  // response can never be replayed to a logged-in staff request (and vice
++  // versa). Only anonymous, identical-for-everyone public data gets a public
++  // Cache-Control; authenticated responses are never publicly cached.
++  res.vary('Authorization');
++  res.vary('Cookie');
+   return apiResponse(res, {
+     message: 'Eventos listados.',
+     data: { events: payload.events },
+     meta: payload.meta,
+-    cacheSeconds: search ? 0 : Math.max(1, Math.floor(env.publicCacheTtlMs / 1000)),
++    cacheSeconds: !staff && !search ? Math.max(1, Math.floor(env.publicCacheTtlMs / 1000)) : 0,
+   });
+ });
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/controllers/notificationController.js acade/backend/src/controllers/notificationController.js
+--- acade_orig/backend/src/controllers/notificationController.js	2026-09-16 12:30:23.000000000 +0000
++++ acade/backend/src/controllers/notificationController.js	2026-09-16 12:57:33.717732938 +0000
+@@ -2,23 +2,24 @@
+ import { ApiError } from '../utils/apiError.js';
+ import { apiResponse } from '../utils/apiResponse.js';
+ import { asyncHandler } from '../utils/asyncHandler.js';
++import { parsePagination, paginationMeta } from '../utils/pagination.js';
+ 
+ export const listMyNotifications = asyncHandler(async (req, res) => {
+-  const { page = 1, limit = 20 } = req.query;
++  const { page, limit, skip, take } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 100 });
+   const [total, notifications] = await Promise.all([
+     prisma.notification.count({ where: { userId: req.user.id } }),
+     prisma.notification.findMany({
+       where: { userId: req.user.id },
+       orderBy: { createdAt: 'desc' },
+-      skip: (Number(page) - 1) * Number(limit),
+-      take: Number(limit),
++      skip,
++      take,
+     }),
+   ]);
+   const unread = await prisma.notification.count({ where: { userId: req.user.id, read: false } });
+   return apiResponse(res, {
+     message: 'Notificações.',
+     data: { notifications, unread },
+-    meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
++    meta: paginationMeta({ page, limit, total }),
+   });
+ });
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/routes/event.routes.js acade/backend/src/routes/event.routes.js
+--- acade_orig/backend/src/routes/event.routes.js	2026-09-16 12:30:52.000000000 +0000
++++ acade/backend/src/routes/event.routes.js	2026-09-16 12:54:33.110824134 +0000
+@@ -8,8 +8,10 @@
+ 
+ const router = Router();
+ 
+-// Public
+-router.get('/', ctrl.listEvents);
++// Public. optionalAuthenticate lets staff receive their (superset) projection
++// without a separate route; the projection is chosen from the verified token,
++// never from client input. Query is validated + clamped before the controller.
++router.get('/', optionalAuthenticate, validate(eventSchemas.listQuery), ctrl.listEvents);
+ router.get('/:idOrSlug', optionalAuthenticate, ctrl.getEvent);
+ 
+ // Activities nested under an event (public)
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/services/orderService.js acade/backend/src/services/orderService.js
+--- acade_orig/backend/src/services/orderService.js	2026-09-16 12:30:06.000000000 +0000
++++ acade/backend/src/services/orderService.js	2026-09-16 12:58:02.446195726 +0000
+@@ -6,6 +6,7 @@
+ import { createPayment } from './paymentService.js';
+ import { generateOrderCode } from '../utils/codes.js';
+ import { invalidate } from '../utils/cache.js';
++import { parsePagination, paginationMeta } from '../utils/pagination.js';
+ 
+ const orderInclude = {
+   items: true,
+@@ -99,6 +100,9 @@
+ }
+ 
+ export async function listOrders({ status, page = 1, limit = 20, search } = {}) {
++  ({ page, limit } = parsePagination({ page, limit }, { defaultLimit: 20, maxLimit: 200 }));
++  const skip = (page - 1) * limit;
++  const take = limit;
+   const where = {};
+   if (status) where.status = status;
+   if (search) {
+@@ -113,11 +117,11 @@
+       where,
+       include: { ...orderInclude, user: { select: { id: true, name: true, email: true } } },
+       orderBy: { createdAt: 'desc' },
+-      skip: (Number(page) - 1) * Number(limit),
+-      take: Number(limit),
++      skip,
++      take,
+     }),
+   ]);
+-  return { orders, meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } };
++  return { orders, meta: paginationMeta({ page, limit, total }) };
+ }
+ 
+ /** Detalhe com validação de dono (ou staff). */
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/services/paymentService.js acade/backend/src/services/paymentService.js
+--- acade_orig/backend/src/services/paymentService.js	2026-09-16 12:30:04.000000000 +0000
++++ acade/backend/src/services/paymentService.js	2026-09-16 12:57:58.658134706 +0000
+@@ -4,6 +4,7 @@
+ import { createNotification } from './notificationService.js';
+ import { getActivePixConfig, buildPayloadWith } from './pixService.js';
+ import { generatePaymentCode } from '../utils/codes.js';
++import { parsePagination, paginationMeta } from '../utils/pagination.js';
+ 
+ const paymentInclude = {
+   event: { select: { id: true, name: true, isPaid: true, priceCents: true } },
+@@ -147,6 +148,9 @@
+ }
+ 
+ export async function listPayments({ status, eventId, userId, page = 1, limit = 20, search } = {}) {
++  ({ page, limit } = parsePagination({ page, limit }, { defaultLimit: 20, maxLimit: 200 }));
++  const skip = (page - 1) * limit;
++  const take = limit;
+   const where = {};
+   if (status) where.status = status;
+   if (eventId) where.eventId = eventId;
+@@ -164,11 +168,11 @@
+       where,
+       include: { ...paymentInclude, user: { select: { id: true, name: true, email: true } } },
+       orderBy: { createdAt: 'desc' },
+-      skip: (Number(page) - 1) * Number(limit),
+-      take: Number(limit),
++      skip,
++      take,
+     }),
+   ]);
+-  return { payments, meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } };
++  return { payments, meta: paginationMeta({ page, limit, total }) };
+ }
+ 
+ /**
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/utils/eventProjection.js acade/backend/src/utils/eventProjection.js
+--- acade_orig/backend/src/utils/eventProjection.js	1970-01-01 00:00:00.000000000 +0000
++++ acade/backend/src/utils/eventProjection.js	2026-09-16 12:54:02.830336431 +0000
+@@ -0,0 +1,49 @@
++/**
++ * V9.4 — Projection of the event listing per caller profile.
++ *
++ * WHY THIS EXISTS
++ * ---------------
++ * `GET /api/events` used to return the *whole* Event row (~1.25 KB/event)
++ * including fields the listing UI never reads (description, address, flags,
++ * payment min/max, deletedAt, timestamps, full institution/organizer). That
++ * payload is paid on every request: JSON.stringify + gzip + ETag + network.
++ *
++ * The listing is a *different use case* from the detail page, so it gets its
++ * own `select`. Compatibility is preserved by keeping every field the frontend
++ * actually reads (verified in `frontend/src/components/Cards.jsx`,
++ * `frontend/src/pages/Events.jsx`, `frontend/src/pages/Home.jsx` and the admin
++ * screens — see RELATORIO_FINAL_AUDITORIA.md §2).
++ *
++ * The public projection is the minimum contract. Staff (ADMIN/ORGANIZER)
++ * screens legitimately need `startTime` (AdminDashboard week grid) and
++ * `_count.registrations` (AdminEventos "Inscritos" column), so they get a
++ * superset. This keeps the contract correct instead of trimming something an
++ * admin screen depends on.
++ */
++
++/** Fields rendered by EventCard / Events / Home (public listing). */
++export const PUBLIC_EVENT_LIST_SELECT = Object.freeze({
++  id: true,
++  name: true,
++  slug: true,
++  shortDescription: true,
++  bannerUrl: true,
++  startDate: true,
++  endDate: true,
++  registrationEnd: true,
++  status: true,
++  location: true,
++  category: true,
++  _count: { select: { activities: true } },
++});
++
++/** Public contract + the two extra fields used by admin list screens. */
++export const STAFF_EVENT_LIST_SELECT = Object.freeze({
++  ...PUBLIC_EVENT_LIST_SELECT,
++  startTime: true,
++  _count: { select: { activities: true, registrations: true } },
++});
++
++export function eventListSelectFor({ staff = false } = {}) {
++  return staff ? STAFF_EVENT_LIST_SELECT : PUBLIC_EVENT_LIST_SELECT;
++}
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/utils/pagination.js acade/backend/src/utils/pagination.js
+--- acade_orig/backend/src/utils/pagination.js	1970-01-01 00:00:00.000000000 +0000
++++ acade/backend/src/utils/pagination.js	2026-09-16 12:57:29.665667663 +0000
+@@ -0,0 +1,35 @@
++/**
++ * V9.4 — Shared pagination guardrails.
++ *
++ * Before this helper, several list endpoints did `take: Number(req.query.limit)`
++ * with no ceiling. A single authenticated caller could request `limit=999999`
++ * and force the instance to serialize (and gzip) an unbounded payload — the
++ * cheapest available denial-of-service. Every list endpoint now clamps `page`
++ * and `limit` to sane, per-endpoint bounds.
++ *
++ * `skip`/`take` are ready for Prisma; `paginationMeta` builds the response meta.
++ */
++
++/** Parse a positive integer, falling back on garbage and clamping to `max`. */
++export function toPositiveInt(value, fallback, max) {
++  const n = Number.parseInt(value, 10);
++  if (!Number.isFinite(n) || n < 1) return fallback;
++  return Math.min(n, max);
++}
++
++/**
++ * @param {object} query           req.query (strings)
++ * @param {object} [opts]
++ * @param {number} [opts.defaultLimit=20]
++ * @param {number} [opts.maxLimit=200]
++ * @param {number} [opts.maxPage=1_000_000]
++ */
++export function parsePagination(query = {}, { defaultLimit = 20, maxLimit = 200, maxPage = 1_000_000 } = {}) {
++  const page = toPositiveInt(query.page, 1, maxPage);
++  const limit = toPositiveInt(query.limit, defaultLimit, maxLimit);
++  return { page, limit, skip: (page - 1) * limit, take: limit };
++}
++
++export function paginationMeta({ page, limit, total }) {
++  return { page, limit, total, pages: Math.ceil(total / limit) };
++}
+diff -ruN '--exclude=node_modules' '--exclude=dist' '--exclude=package-lock.json' acade_orig/backend/src/validations/schemas.js acade/backend/src/validations/schemas.js
+--- acade_orig/backend/src/validations/schemas.js	2026-09-16 12:36:48.000000000 +0000
++++ acade/backend/src/validations/schemas.js	2026-09-16 12:54:29.794770745 +0000
+@@ -85,6 +85,23 @@
+       organizerId: Joi.string().allow('', null),
+     }),
+   },
++  // Query contract for the public listing. `stripUnknown` drops junk params and
++  // the caps stop an unbounded `limit`. The server still clamps defensively.
++  listQuery: {
++    query: Joi.object({
++      page: Joi.number().integer().min(1).max(1000000).default(1),
++      limit: Joi.number().integer().min(1).max(200).default(12),
++      search: Joi.string().trim().max(120).allow('').default(''),
++      category: Joi.string().trim().max(120).allow(''),
++      modality: Joi.string().valid('PRESENCIAL', 'ONLINE', 'HIBRIDO').allow(''),
++      status: Joi.string()
++        .valid('DRAFT', 'PUBLISHED', 'OPEN', 'ONGOING', 'CLOSED', 'CANCELLED')
++        .allow(''),
++      location: Joi.string().trim().max(120).allow(''),
++      date: Joi.string().valid('upcoming', 'past').allow(''),
++      sort: Joi.string().valid('recent', 'closest', 'popular').default('recent'),
++    }),
++  },
+   update: {
+     params: Joi.object({ id: Joi.string().required() }),
+     body: Joi.object({}).unknown(true),

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Calendar, MapPin, Clock, Users, Award, CheckCircle2, Ticket, AlertCircle } from 'lucide-react';
+import { Calendar, MapPin, Clock, Users, Award, CheckCircle2, Ticket, AlertCircle, Share2, Copy } from 'lucide-react';
 import { eventApi, registrationApi } from '../api/services';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Button, Spinner, ErrorState, StatusBadge, Checkbox, SmartImage } from '../components/ui';
 import { QRCodeCard } from '../components/Cards';
+import { Modal } from '../components/Overlay';
 import { PixCard, formatBRL } from '../components/PixCard';
 import { formatDate, formatNumber, ACTIVITY_TYPE_LABELS, MODALITY_LABELS, fullNameInitials, calendarDayKey } from '../utils/format';
 
@@ -20,6 +21,7 @@ export default function EventDetail() {
   const [confirmation, setConfirmation] = useState(null);
   const [formError, setFormError] = useState(null);
   const [myReg, setMyReg] = useState(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const { data, loading, error } = useApi(() => eventApi.get(idOrSlug).then((r) => r.data), [idOrSlug]);
   const event = data;
@@ -46,6 +48,51 @@ export default function EventDetail() {
     (acc[key] = acc[key] || []).push(a);
     return acc;
   }, {});
+
+  const eventPath = `/eventos/${event?.slug || event?.id || ''}`;
+  const shareUrl = `${window.location.origin}${eventPath}`;
+
+  const shareEvent = async () => {
+    const payload = {
+      title: event.name,
+      text: `Confira o evento "${event.name}" no AcadeConnect!`,
+      url: shareUrl,
+    };
+    // Web Share API (mobile/modern browsers): native share sheet.
+    if (navigator.share) {
+      try { await navigator.share(payload); return; }
+      catch (e) { if (e?.name === 'AbortError') return; /* fall through to manual options */ }
+    }
+    setShareOpen(true);
+  };
+
+  const copyShareLink = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = shareUrl;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      toast.success('Link copiado!');
+      setShareOpen(false);
+    } catch { toast.error('Não foi possível copiar o link.'); }
+  };
+
+  const shareTo = (network) => {
+    const text = encodeURIComponent(`Confira o evento "${event.name}" no AcadeConnect!`);
+    const url = encodeURIComponent(shareUrl);
+    const targets = {
+      whatsapp: `https://wa.me/?text=${encodeURIComponent(`${event.name} - ${shareUrl}`)}`,
+      facebook: `https://www.facebook.com/sharer/sharer.php?u=${url}`,
+      x: `https://twitter.com/intent/tweet?text=${text}&url=${url}`,
+    };
+    window.open(targets[network], '_blank', 'noopener,noreferrer');
+  };
 
   const toggleActivity = (id) => {
     setFormError(null);
@@ -122,6 +169,11 @@ export default function EventDetail() {
             <span><Calendar size={18} /> {formatDate(event.startDate)} — {formatDate(event.endDate)}</span>
             <span><MapPin size={18} /> {event.location || 'A definir'}</span>
             <span><Users size={18} /> {formatNumber(event._count?.registrations || 0)} inscritos</span>
+          </div>
+          <div className="mt-2">
+            <Button variant="secondary" size="sm" onClick={shareEvent} icon={<Share2 size={16} />}>
+              Compartilhar evento
+            </Button>
           </div>
         </div>
       </section>
@@ -251,6 +303,17 @@ export default function EventDetail() {
           </aside>
         </div>
       </div>
+
+      <Modal open={shareOpen} onClose={() => setShareOpen(false)} title="Compartilhar evento">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <p className="text-muted" style={{ margin: 0, fontSize: '0.85rem' }}>Envie este evento para amigos ou copie o link direto.</p>
+          <Button variant="secondary" onClick={() => shareTo('whatsapp')}>WhatsApp</Button>
+          <Button variant="secondary" onClick={() => shareTo('facebook')}>Facebook</Button>
+          <Button variant="secondary" onClick={() => shareTo('x')}>X / Twitter</Button>
+          <Button variant="primary" onClick={copyShareLink} icon={<Copy size={16} />}>Copiar link</Button>
+          <code style={{ fontSize: '0.75rem', wordBreak: 'break-all', color: 'var(--text-muted)' }}>{shareUrl}</code>
+        </div>
+      </Modal>
     </>
   );
 }

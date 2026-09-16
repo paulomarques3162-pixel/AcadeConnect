@@ -4,7 +4,7 @@ import { ApiError } from '../utils/apiError.js';
 import { buildCertificatePdf } from '../utils/pdf.js';
 import { generateCertificateCode } from '../utils/codes.js';
 import { createAuditLog } from './auditLogService.js';
-import { createNotification } from './notificationService.js';
+import { createNotification, createNotifications } from './notificationService.js';
 import { sendEmail, emailTemplates } from './emailService.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -362,6 +362,104 @@ export async function cancelCertificate(certificateId, { reason, operatorId = nu
     details: { reason: reason ? String(reason).trim() : null },
   });
   return updated;
+}
+
+/**
+ * Cancel (invalidate) the EVENT-LEVEL certificates of every participant who is
+ * ACTUALLY marked present in the event.
+ *
+ * "Present" here follows the system rule: a CONFIRMED registration of this
+ * event with at least one attendance row in status PRESENT. Absent participants,
+ * registrations of other events and already-cancelled certificates are never
+ * touched.
+ *
+ * Safety / performance:
+ *  - Nothing is deleted: rows keep their history and can be re-issued later.
+ *  - ONE bulk UPDATE instead of N requests/updates from the frontend.
+ *  - Notifications are inserted in a single batched INSERT (createMany).
+ *  - The whole selection+update runs in a transaction so the result is coherent.
+ */
+export async function cancelCertificatesForPresentParticipants(eventId, { reason, operatorId = null } = {}) {
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { id: true, name: true },
+  });
+  if (!event) throw new ApiError(404, 'Evento não encontrado.');
+
+  const result = await prisma.$transaction(async (tx) => {
+    // Present participants of THIS event only.
+    const presentRegs = await tx.registration.findMany({
+      where: {
+        eventId,
+        status: 'CONFIRMED',
+        attendance: { some: { status: 'PRESENT' } },
+      },
+      select: { id: true, userId: true },
+    });
+
+    if (presentRegs.length === 0) {
+      return { presentParticipants: 0, affected: 0, alreadyCancelled: 0, userIds: [] };
+    }
+
+    const regIds = presentRegs.map((r) => r.id);
+    const certificates = await tx.certificate.findMany({
+      where: { eventId, registrationId: { in: regIds }, status: { not: 'CANCELLED' } },
+      select: { id: true, userId: true },
+    });
+
+    if (certificates.length === 0) {
+      return { presentParticipants: presentRegs.length, affected: 0, alreadyCancelled: 0, userIds: [] };
+    }
+
+    const stamp = new Date();
+    const updated = await tx.certificate.updateMany({
+      where: { id: { in: certificates.map((c) => c.id) }, status: { not: 'CANCELLED' } },
+      data: {
+        status: 'CANCELLED',
+        invalidatedAt: stamp,
+        correctionReason: reason ? String(reason).trim() : 'Cancelamento em massa (participantes presentes)',
+        correctedById: operatorId || null,
+        correctedAt: stamp,
+      },
+    });
+
+    return {
+      presentParticipants: presentRegs.length,
+      affected: updated.count,
+      alreadyCancelled: 0,
+      userIds: [...new Set(certificates.map((c) => c.userId))],
+    };
+  });
+
+  if (result.affected > 0) {
+    // One batched INSERT for all recipients (never N inserts in a loop).
+    await createNotifications(result.userIds, {
+      type: 'CERTIFICATE',
+      title: 'Certificado cancelado',
+      message: `A organização cancelou os certificados do evento "${event.name}".`,
+      link: '/certificados',
+    });
+  }
+
+  await createAuditLog({
+    userId: operatorId,
+    action: 'CERTIFICATES_BULK_CANCELLED',
+    resource: 'Event',
+    resourceId: eventId,
+    details: {
+      presentParticipants: result.presentParticipants,
+      affected: result.affected,
+      reason: reason ? String(reason).trim() : null,
+    },
+  });
+
+  return {
+    eventId,
+    eventName: event.name,
+    presentParticipants: result.presentParticipants,
+    affected: result.affected,
+    alreadyCancelled: 0,
+  };
 }
 
 /**

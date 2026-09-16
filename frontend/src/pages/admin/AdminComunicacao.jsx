@@ -27,6 +27,11 @@ export default function AdminComunicacao() {
   const [message, setMessage] = useState('');
   const [starting, setStarting] = useState(false);
 
+  // General communication (ADMIN only).
+  const [bTitle, setBTitle] = useState('');
+  const [bMsg, setBMsg] = useState('');
+  const [broadcasting, setBroadcasting] = useState(false);
+
   const list = useApi(() => conversationApi.adminList().then((r) => r.data.conversations), []);
   const { conversation: detail, threadRef, onScroll, markRead, reload: reloadDetail } = useLiveConversation(selectedId);
 
@@ -80,6 +85,19 @@ export default function AdminComunicacao() {
     finally { setStarting(false); }
   };
 
+  const sendBroadcast = async (e) => {
+    e.preventDefault();
+    if (bTitle.trim().length < 3 || bMsg.trim().length < 3) return toast.error('Preencha o título e a mensagem.');
+    setBroadcasting(true);
+    try {
+      const res = await adminApi.broadcast({ title: bTitle.trim(), message: bMsg.trim() });
+      toast.success(res.message || `Comunicação enviada para ${res.data?.recipients ?? 0} usuário(s).`);
+      setBTitle('');
+      setBMsg('');
+    } catch (err) { toast.error(getErrorMessage(err)); }
+    finally { setBroadcasting(false); }
+  };
+
   return (
     <>
       <div className="page-head">
@@ -89,6 +107,32 @@ export default function AdminComunicacao() {
         </div>
         <Button onClick={openNew} icon={<Mail size={17} />}>Nova mensagem</Button>
       </div>
+
+      {user?.role === 'ADMIN' && (
+        <Card className="card-pad mb-3">
+          <form onSubmit={sendBroadcast} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <strong>Comunicação geral</strong>
+              <p className="text-muted" style={{ margin: 0, fontSize: '0.82rem' }}>
+                Envia uma notificação para <strong>todos os usuários ativos</strong> (ex.: “O AcadeConnect foi atualizado”). Usa SSE para atualizar o sino sem polling e evita envios duplicados.
+              </p>
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: '1fr 2fr' }}>
+              <Field label="Título" required>
+                <Input value={bTitle} onChange={(e) => setBTitle(e.target.value)} placeholder="Ex.: O AcadeConnect foi atualizado" maxLength={120} />
+              </Field>
+              <Field label="Mensagem" required>
+                <Textarea value={bMsg} onChange={(e) => setBMsg(e.target.value)} placeholder="Escreva a comunicação que todos receberão..." maxLength={1000} />
+              </Field>
+            </div>
+            <div>
+              <Button type="submit" loading={broadcasting} disabled={bTitle.trim().length < 3 || bMsg.trim().length < 3} icon={<Send size={16} />}>
+                Enviar para todos
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(240px,320px) 1fr' }}>
         <div className="list">

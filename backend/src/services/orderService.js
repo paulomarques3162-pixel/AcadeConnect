@@ -6,6 +6,7 @@ import { validateCoupon, computeDiscountCents } from './couponService.js';
 import { createPayment } from './paymentService.js';
 import { generateOrderCode } from '../utils/codes.js';
 import { invalidate } from '../utils/cache.js';
+import { parsePagination, paginationMeta } from '../utils/pagination.js';
 
 const orderInclude = {
   items: true,
@@ -99,6 +100,9 @@ export async function listMyOrders(userId, { limit = 100 } = {}) {
 }
 
 export async function listOrders({ status, page = 1, limit = 20, search } = {}) {
+  ({ page, limit } = parsePagination({ page, limit }, { defaultLimit: 20, maxLimit: 200 }));
+  const skip = (page - 1) * limit;
+  const take = limit;
   const where = {};
   if (status) where.status = status;
   if (search) {
@@ -113,11 +117,11 @@ export async function listOrders({ status, page = 1, limit = 20, search } = {}) 
       where,
       include: { ...orderInclude, user: { select: { id: true, name: true, email: true } } },
       orderBy: { createdAt: 'desc' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
+      skip,
+      take,
     }),
   ]);
-  return { orders, meta: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } };
+  return { orders, meta: paginationMeta({ page, limit, total }) };
 }
 
 /** Detalhe com validação de dono (ou staff). */

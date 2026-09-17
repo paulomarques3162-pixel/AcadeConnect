@@ -2,8 +2,9 @@ import { Router } from 'express';
 import { validate } from '../middlewares/validate.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
 import { heavyLimiter } from '../middlewares/rateLimiter.js';
-import { adminUserSchemas, institutionSchemas, exportSchemas, broadcastSchemas } from '../validations/schemas.js';
+import { adminUserSchemas, institutionSchemas, exportSchemas, broadcastSchemas, contactSchemas } from '../validations/schemas.js';
 import * as ctrl from '../controllers/adminController.js';
+import * as settingCtrl from '../controllers/settingController.js';
 import * as reportCtrl from '../controllers/reportController.js';
 import * as exportCtrl from '../controllers/exportController.js';
 
@@ -30,6 +31,9 @@ router.delete('/institutions/:id', authorize('ADMIN'), validate(institutionSchem
 
 // Audit logs
 router.get('/logs', ctrl.listAuditLogs);
+
+// Informações de contato da plataforma (somente ADMIN altera; leitura é pública).
+router.put('/settings/contact', authorize('ADMIN'), validate(contactSchemas.update), settingCtrl.updateContact);
 
 // General communication to all users (ADMIN only)
 router.post('/notifications/broadcast', heavyLimiter, authorize('ADMIN'), validate(broadcastSchemas), ctrl.broadcastNotification);

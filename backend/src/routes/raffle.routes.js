@@ -15,6 +15,10 @@ router.get('/', authorize('ADMIN', 'ORGANIZER'), ctrl.list);
 router.post('/', authorize('ADMIN', 'ORGANIZER'), validate(raffleSchemas.create), ctrl.create);
 router.get('/:id', authorize('ADMIN', 'ORGANIZER'), validate(raffleSchemas.idParam), ctrl.getOne);
 router.get('/:id/eligible', authorize('ADMIN', 'ORGANIZER'), validate(raffleSchemas.idParam), ctrl.eligible);
+router.put('/:id', authorize('ADMIN', 'ORGANIZER'), validate(raffleSchemas.update), ctrl.update);
+router.delete('/:id', authorize('ADMIN', 'ORGANIZER'), validate(raffleSchemas.idParam), ctrl.remove);
+// Pesos/probabilidades: configuração exclusivamente administrativa.
+router.put('/:id/weights', authorize('ADMIN'), validate(raffleSchemas.weights), ctrl.setWeights);
 router.post('/:id/draw', authorize('ADMIN', 'ORGANIZER'), validate(raffleSchemas.idParam), ctrl.draw);
 router.post('/:id/status', authorize('ADMIN', 'ORGANIZER'), validate(raffleSchemas.status), ctrl.setStatus);
 

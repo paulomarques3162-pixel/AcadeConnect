@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, MessagesSquare, Trophy, Compass, Zap, X } from 'lucide-react';
+import { Bell, MessagesSquare, Trophy, Compass, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLiveData } from '../context/LiveDataContext';
 
@@ -66,7 +66,9 @@ export function QuickAccess() {
         aria-label={open ? 'Fechar atalhos rápidos' : 'Abrir atalhos rápidos'}
         title={open ? 'Fechar atalhos' : 'Atalhos rápidos'}
       >
-        {open ? <X size={22} /> : <Zap size={22} />}
+        {open
+          ? <X size={26} />
+          : <img className="quick-access__mascot" src="/mustang-white.png" alt="" aria-hidden="true" />}
         {!open && (unreadNotifications + unreadConversations) > 0 && <span className="quick-access__dot" />}
       </button>
     </div>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Trophy, Users, Wand2, Sparkles, CalendarDays, UserCheck, Medal, Pencil, Trash2, SlidersHorizontal } from 'lucide-react';
+import { Plus, Trophy, Users, Wand2, Sparkles, CalendarDays, UserCheck, Medal, Pencil, Trash2 } from 'lucide-react';
 import { raffleApi, eventApi } from '../../api/services';
 import { useApi } from '../../hooks/useApi';
 import { useToast } from '../../context/ToastContext';
@@ -288,7 +288,10 @@ export default function AdminSorteios() {
                 <Button variant="secondary" onClick={() => closeRaffle(raffle.id)} disabled={busy}>Encerrar</Button>
               )}
               <Button variant="secondary" onClick={openEdit} icon={<Pencil size={16} />} disabled={busy}>Editar</Button>
-              <Button variant="secondary" onClick={openWeights} icon={<SlidersHorizontal size={16} />} disabled={busy}>Probabilidades</Button>
+              {/* Configuração administrativa de pesos = "ARMS". Discreta de
+                  propósito (o mega prompt pede que o mecanismo não fique exposto
+                  como um controle visível); a segurança real está no backend. */}
+              <Button variant="ghost" onClick={openWeights} disabled={busy} title="ARMS — configuração interna" aria-label="ARMS — configuração interna">ARMS</Button>
               <Button variant="danger" onClick={() => setConfirmRemove(raffle)} icon={<Trash2 size={16} />} disabled={busy}>Remover</Button>
             </div>
           </div>
@@ -394,7 +397,7 @@ export default function AdminSorteios() {
 
       {/* Configuração administrativa de pesos/probabilidades (nunca visível em
           páginas públicas; a rota é protegida no backend). */}
-      <Modal open={weightsOpen} onClose={() => setWeightsOpen(false)} title="Probabilidades do sorteio" size="md">
+      <Modal open={weightsOpen} onClose={() => setWeightsOpen(false)} title="ARMS" size="md">
         <form onSubmit={saveWeights} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <p className="text-muted" style={{ margin: 0, fontSize: '0.85rem' }}>
             Defina o peso de cada participante elegível. O peso padrão é <strong>1</strong>; um peso <strong>5</strong> torna o

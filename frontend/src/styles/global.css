@@ -500,50 +500,61 @@ img { max-width: 100%; display: block; }
 /* ============ Atalhos rápidos (balão flutuante) ============ */
 .quick-access {
   position: fixed;
-  right: calc(16px + env(safe-area-inset-right, 0px));
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  right: calc(18px + env(safe-area-inset-right, 0px));
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   z-index: 90;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 10px;
+  gap: 12px;
 }
 .quick-access__toggle {
-  width: 50px; height: 50px; border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--brand); color: #fff;
+  width: 68px; height: 68px; border-radius: 50%;
+  /* Fundo escuro da marca para dar contraste ao cavalo branco. */
+  background:
+    radial-gradient(circle at 32% 24%, #1f7a44 0%, #14532d 46%, #0b2415 100%);
+  border: 2px solid var(--gold, #d4af37);
+  color: #fff;
   display: inline-flex; align-items: center; justify-content: center;
-  box-shadow: var(--shadow-lg); cursor: pointer; position: relative;
-  transition: transform var(--transition), background var(--transition);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.34), 0 0 0 6px rgba(212, 175, 55, 0.16);
+  cursor: pointer; position: relative;
+  transition: transform var(--transition), box-shadow var(--transition);
 }
-.quick-access__toggle:hover { transform: translateY(-1px); }
-.quick-access__toggle:focus-visible { outline: 3px solid var(--brand-100); outline-offset: 2px; }
+.quick-access__toggle:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 14px 32px rgba(15, 23, 42, 0.42), 0 0 0 8px rgba(212, 175, 55, 0.22); }
+.quick-access__toggle:focus-visible { outline: 3px solid var(--gold, #d4af37); outline-offset: 3px; }
+.quick-access__mascot {
+  width: 54px; height: 54px; object-fit: contain;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
+  pointer-events: none;
+}
 .quick-access__dot {
-  position: absolute; top: 8px; right: 8px; width: 10px; height: 10px;
-  border-radius: 50%; background: var(--danger); border: 2px solid var(--brand);
+  position: absolute; top: 6px; right: 6px; width: 13px; height: 13px;
+  border-radius: 50%; background: var(--danger); border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.35);
 }
-.quick-access__items { display: flex; flex-direction: column; gap: 8px; animation: fade 0.15s ease; }
+.quick-access__items { display: flex; flex-direction: column; gap: 10px; animation: fade 0.16s ease; }
 .quick-access__item {
-  display: inline-flex; align-items: center; gap: 10px;
+  display: inline-flex; align-items: center; gap: 12px;
   background: var(--surface); color: var(--text);
-  border: 1px solid var(--border); border-radius: 30px;
-  padding: 8px 8px 8px 16px; box-shadow: var(--shadow);
-  cursor: pointer; font-weight: 600; font-size: 0.88rem;
+  border: 1px solid var(--border); border-radius: 34px;
+  padding: 9px 9px 9px 18px; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+  cursor: pointer; font-weight: 700; font-size: 0.95rem;
 }
-.quick-access__item:hover { background: var(--surface-2); }
+.quick-access__item:hover { background: var(--surface-2); transform: translateX(-2px); }
 .quick-access__item-icon {
-  position: relative; width: 34px; height: 34px; border-radius: 50%;
+  position: relative; width: 42px; height: 42px; border-radius: 50%;
   background: var(--brand-100); color: var(--brand);
   display: inline-flex; align-items: center; justify-content: center;
 }
 .quick-access__badge {
-  position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px;
-  padding: 0 4px; border-radius: 10px; background: var(--danger); color: #fff;
-  font-size: 0.62rem; font-weight: 700;
+  position: absolute; top: -4px; right: -4px; min-width: 19px; height: 19px;
+  padding: 0 5px; border-radius: 10px; background: var(--danger); color: #fff;
+  font-size: 0.66rem; font-weight: 800;
   display: inline-flex; align-items: center; justify-content: center;
 }
 @media (max-width: 640px) {
-  .quick-access__toggle { width: 46px; height: 46px; }
-  .quick-access__item-label { display: none; }
-  .quick-access__item { padding: 6px; border-radius: 50%; }
+  .quick-access__toggle { width: 62px; height: 62px; }
+  .quick-access__mascot { width: 50px; height: 50px; }
+  .quick-access__item { font-size: 0.9rem; padding: 8px 8px 8px 14px; }
+  .quick-access__item-icon { width: 38px; height: 38px; }
 }

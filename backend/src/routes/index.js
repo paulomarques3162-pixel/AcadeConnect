@@ -17,6 +17,7 @@ import couponRoutes from './coupons.routes.js';
 import orderRoutes from './orders.routes.js';
 import conversationRoutes from './conversations.routes.js';
 import realtimeRoutes from './realtime.routes.js';
+import settingRoutes from './settings.routes.js';
 import { authenticate } from '../middlewares/auth.js';
 import * as bootstrapCtrl from '../controllers/bootstrapController.js';
 import { metricsSnapshot } from '../utils/metrics.js';
@@ -62,6 +63,7 @@ router.use('/coupons', couponRoutes);
 router.use('/orders', orderRoutes);
 router.use('/conversations', conversationRoutes);
 router.use('/realtime', realtimeRoutes);
+router.use('/settings', settingRoutes);
 router.use('/admin', adminRoutes);
 
 export default router;

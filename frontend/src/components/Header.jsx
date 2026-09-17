@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { Bell, LogOut, Menu, Moon, Sun, User, LayoutDashboard, X } from 'lucide-react';
 import { Logo } from './Logo';
@@ -130,7 +131,11 @@ export function Header() {
         </div>
       </div>
 
-      {mobileOpen && (
+      {/* O menu mobile é renderizado em um portal para fora do <header>.
+          O header usa `backdrop-filter`, que cria um "containing block" e faz
+          `position: fixed` se posicionar em relação ao header — era isso que
+          deixava o conteúdo da página aparecer atrás do menu. */}
+      {mobileOpen && typeof document !== 'undefined' && createPortal((
         <div className="mobile-menu">
           <div className="mobile-menu__head">
             <Logo />
@@ -154,7 +159,7 @@ export function Header() {
             )}
           </nav>
         </div>
-      )}
+      ), document.body)}
     </header>
   );
 }

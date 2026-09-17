@@ -154,9 +154,46 @@ export const closeActivity = asyncHandler(async (req, res) => {
 });
 
 export const deleteActivity = asyncHandler(async (req, res) => {
-  await prisma.activity.delete({ where: { id: req.params.id } });
+  const { id } = req.params;
+  const activity = await prisma.activity.findUnique({
+    where: { id },
+    include: { event: { select: { id: true, name: true, requireActivityRegistration: true } } },
+  });
+  if (!activity) throw new ApiError(404, 'Atividade não encontrada.');
+
+  // Integridade evento x atividade x inscrição x QR (V9.6).
+  //
+  // Quando o evento EXIGE inscrição em atividade, remover a última atividade
+  // deixaria inscrições ativas sem nenhuma atividade associada (e o QR de
+  // entrada, que depende dessa consistência, continuaria válido apontando para
+  // uma atividade inexistente). Bloqueamos a operação e orientamos o admin a
+  // desativar a exigência antes — evitando registros órfãos.
+  if (activity.event.requireActivityRegistration) {
+    const remaining = await prisma.activity.count({ where: { eventId: activity.eventId, id: { not: id } } });
+    if (remaining === 0) {
+      throw new ApiError(409, 'Este evento exige inscrição em atividade. Desative a exigência antes de excluir a última atividade.');
+    }
+  }
+
+  await prisma.activity.delete({ where: { id } });
+
+  // Inscrições que ficaram sem qualquer atividade após a remoção não podem
+  // manter um QR de entrada ativo para uma atividade que não existe mais.
+  if (activity.event.requireActivityRegistration) {
+    const orphanRegs = await prisma.registration.findMany({
+      where: { eventId: activity.eventId, status: 'CONFIRMED', activityRegistrations: { none: {} } },
+      select: { id: true },
+    });
+    if (orphanRegs.length) {
+      await prisma.registration.updateMany({
+        where: { id: { in: orphanRegs.map((r) => r.id) } },
+        data: { qrActive: false },
+      });
+    }
+  }
+
   invalidate(ACTIVITIES_CACHE_PREFIX);
-  await createAuditLog({ userId: req.user.id, action: 'ACTIVITY_DELETED', resource: 'Activity', resourceId: req.params.id, ip: req.ip });
+  await createAuditLog({ userId: req.user.id, action: 'ACTIVITY_DELETED', resource: 'Activity', resourceId: id, ip: req.ip });
   return apiResponse(res, { message: 'Atividade excluída.' });
 });
 

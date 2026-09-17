@@ -5,6 +5,7 @@ import { Logo } from '../components/Logo';
 import { useTheme } from '../context/ThemeContext';
 import { Moon, Sun } from 'lucide-react';
 import { useLiveData } from '../context/LiveDataContext';
+import { QuickAccess } from '../components/QuickAccess';
 
 const LINKS = [
   { to: '/minha-area', label: 'Minha área', icon: Home },
@@ -69,6 +70,7 @@ export function DashboardLayout() {
           <Outlet />
         </main>
       </div>
+      <QuickAccess />
     </div>
   );
 }

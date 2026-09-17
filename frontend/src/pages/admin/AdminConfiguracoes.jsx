@@ -1,22 +1,46 @@
 import { useState } from 'react';
-import { Building2, Plus, Trash2, ScrollText } from 'lucide-react';
-import { adminApi } from '../../api/services';
+import { Building2, Plus, Trash2, ScrollText, Phone } from 'lucide-react';
+import { adminApi, settingApi } from '../../api/services';
 import { useApi } from '../../hooks/useApi';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
 import { Button, Field, Input, Spinner, ErrorState, Card, StatusBadge } from '../../components/ui';
 import { Modal, ConfirmDialog } from '../../components/Overlay';
 import { formatDateTime, formatNumber } from '../../utils/format';
 
 export default function AdminConfiguracoes() {
   const toast = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const [tab, setTab] = useState('instituicoes');
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState({ name: '', cnpj: '', description: '' });
   const [saving, setSaving] = useState(false);
   const [toDelete, setToDelete] = useState(null);
+  // Informações de contato (V9.6) — editáveis somente pelo ADMIN.
+  const [contact, setContact] = useState(null);
+  const [savingContact, setSavingContact] = useState(false);
 
   const inst = useApi(() => adminApi.institutions().then((r) => r.data.institutions), []);
   const logs = useApi(() => adminApi.logs({ limit: 20 }).then((r) => r.data.logs), []);
+  const contactData = useApi(() => settingApi.contact().then((r) => r.data.contact), []);
+
+  const contactForm = contact || contactData.data || {};
+  const setContactField = (field, value) => setContact({ ...contactForm, [field]: value });
+
+  const submitContact = async (e) => {
+    e.preventDefault();
+    setSavingContact(true);
+    try {
+      const res = await adminApi.updateContact(contactForm);
+      setContact(res.data.contact);
+      toast.success('Informações de contato atualizadas.');
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Não foi possível salvar.');
+    } finally {
+      setSavingContact(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -41,8 +65,35 @@ export default function AdminConfiguracoes() {
 
       <div className="tabs">
         <button className={`tab ${tab === 'instituicoes' ? 'is-active' : ''}`} onClick={() => setTab('instituicoes')}>Instituições</button>
+        {isAdmin && (
+          <button className={`tab ${tab === 'contato' ? 'is-active' : ''}`} onClick={() => setTab('contato')}>Contato</button>
+        )}
         <button className={`tab ${tab === 'logs' ? 'is-active' : ''}`} onClick={() => setTab('logs')}>Logs de auditoria</button>
       </div>
+
+      {tab === 'contato' && isAdmin && (
+        <Card className="card-pad" style={{ maxWidth: 640 }}>
+          <div className="flex mb-3"><Phone size={18} /><strong>Informações de contato do sistema</strong></div>
+          <p className="text-muted" style={{ marginTop: 0 }}>
+            Alterações são aplicadas imediatamente na página pública de contato.
+          </p>
+          {contactData.loading && <Spinner text="Carregando..." />}
+          {contactData.error && <ErrorState onRetry={contactData.reload} />}
+          {!contactData.loading && !contactData.error && (
+            <form onSubmit={submitContact} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <Field label="E-mail"><Input type="email" value={contactForm.email || ''} onChange={(e) => setContactField('email', e.target.value)} /></Field>
+              <Field label="Telefone"><Input value={contactForm.phone || ''} onChange={(e) => setContactField('phone', e.target.value)} /></Field>
+              <Field label="WhatsApp"><Input value={contactForm.whatsapp || ''} onChange={(e) => setContactField('whatsapp', e.target.value)} /></Field>
+              <Field label="Endereço"><Input value={contactForm.address || ''} onChange={(e) => setContactField('address', e.target.value)} /></Field>
+              <Field label="Horário de atendimento"><Input value={contactForm.hours || ''} onChange={(e) => setContactField('hours', e.target.value)} /></Field>
+              <Field label="Instagram"><Input value={contactForm.instagram || ''} onChange={(e) => setContactField('instagram', e.target.value)} /></Field>
+              <Field label="Facebook"><Input value={contactForm.facebook || ''} onChange={(e) => setContactField('facebook', e.target.value)} /></Field>
+              <Field label="YouTube"><Input value={contactForm.youtube || ''} onChange={(e) => setContactField('youtube', e.target.value)} /></Field>
+              <Button type="submit" loading={savingContact}>Salvar informações de contato</Button>
+            </form>
+          )}
+        </Card>
+      )}
 
       {tab === 'instituicoes' && (
         <>

@@ -181,6 +181,7 @@ model User {
   rafflesCreated      Raffle[]          @relation("RaffleCreator")
   raffleWins          RaffleWinner[]    @relation("RaffleWinnerUser")
   rafflesDrawn        RaffleWinner[]    @relation("RaffleDrawer")
+  settingsUpdated     Setting[]         @relation("SettingUpdater")
 
   @@index([email])
   @@index([role])
@@ -634,6 +635,11 @@ model Raffle {
   allowRepeat   Boolean      @default(false)
   status        RaffleStatus @default(OPEN)
   eligibleCount Int          @default(0)
+  // Pesos administrativos por participante ({ userId: peso }). Exclusivo do
+  // painel administrativo: nunca é exposto em endpoints públicos.
+  weights       Json?
+  // Soft delete: preserva histórico de vencedores/auditoria.
+  deletedAt     DateTime?
   createdById   String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -644,6 +650,24 @@ model Raffle {
 
   @@index([eventId])
 @@index([createdAt])
+@@index([eventId, deletedAt])
+}
+
+// ============================================================
+// CONFIGURAÇÕES DA PLATAFORMA (key/value)
+// ============================================================
+
+model Setting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  updatedBy User? @relation("SettingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([key])
 }
 
 model RaffleWinner {

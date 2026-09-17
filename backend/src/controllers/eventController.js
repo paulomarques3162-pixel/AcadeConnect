@@ -373,6 +373,19 @@ export const updateEvent = asyncHandler(async (req, res) => {
     data.slug = candidate;
   }
 
+  // Integridade evento x atividade: não é possível exigir inscrição em
+  // atividade em um evento sem nenhuma atividade cadastrada (isso geraria
+  // inscrições/QRs inválidos). Verificado no backend, não apenas na interface.
+  const willRequireActivity = data.requireActivityRegistration !== undefined
+    ? data.requireActivityRegistration
+    : existing.requireActivityRegistration;
+  if (willRequireActivity) {
+    const activityCount = await prisma.activity.count({ where: { eventId: id } });
+    if (activityCount === 0) {
+      throw new ApiError(422, 'Não é possível exigir inscrição em atividade para um evento sem atividades cadastradas.');
+    }
+  }
+
   const event = await prisma.event.update({
     where: { id },
     data,

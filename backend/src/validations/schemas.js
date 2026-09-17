@@ -265,6 +265,23 @@ export const adminUserSchemas = {
   idParam: { params: Joi.object({ id: Joi.string().required() }) },
 };
 
+const contactText = Joi.string().trim().max(300).allow('', null);
+
+export const contactSchemas = {
+  update: {
+    body: Joi.object({
+      email: Joi.string().trim().email().max(200).allow('', null),
+      phone: contactText,
+      whatsapp: contactText,
+      address: contactText,
+      instagram: contactText,
+      facebook: contactText,
+      youtube: contactText,
+      hours: contactText,
+    }).min(1),
+  },
+};
+
 export const institutionSchemas = {
   create: {
     body: Joi.object({

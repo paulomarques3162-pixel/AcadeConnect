@@ -21,6 +21,7 @@ const MinhaArea = lazy(() => import('./pages/participant/MinhaArea'));
 const MinhasInscricoes = lazy(() => import('./pages/participant/MinhasInscricoes'));
 const InscricaoDetail = lazy(() => import('./pages/participant/InscricaoDetail'));
 const Perfil = lazy(() => import('./pages/participant/Perfil'));
+const Notificacoes = lazy(() => import('./pages/participant/Notificacoes'));
 const Certificados = lazy(() => import('./pages/participant/Certificados'));
 const CertificadoDetail = lazy(() => import('./pages/participant/CertificadoDetail'));
 
@@ -87,6 +88,7 @@ export default function App() {
             <Route path="/minhas-inscricoes" element={<MinhasInscricoes />} />
             <Route path="/inscricao/:id" element={<InscricaoDetail />} />
             <Route path="/perfil" element={<Perfil />} />
+            <Route path="/notificacoes" element={<Notificacoes />} />
             <Route path="/certificados" element={<Certificados />} />
             <Route path="/certificados/:id" element={<CertificadoDetail />} />
             <Route path="/loja" element={<Loja />} />

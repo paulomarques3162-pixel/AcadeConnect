@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Plus, Trophy, Users, Wand2, Sparkles, CalendarDays, UserCheck, Medal } from 'lucide-react';
+import { Plus, Trophy, Users, Wand2, Sparkles, CalendarDays, UserCheck, Medal, Pencil, Trash2, SlidersHorizontal } from 'lucide-react';
 import { raffleApi, eventApi } from '../../api/services';
 import { useApi } from '../../hooks/useApi';
 import { useToast } from '../../context/ToastContext';
 import { Roulette } from '../../components/Roulette';
 import { Button, Field, Input, Select, Checkbox, Card, StatusBadge, Spinner, ErrorState, EmptyState } from '../../components/ui';
-import { Modal } from '../../components/Overlay';
+import { Modal, ConfirmDialog } from '../../components/Overlay';
 import { formatDateTime, formatNumber } from '../../utils/format';
 import { getErrorMessage } from '../../api/client';
 import '../../styles/sorteio.css';
@@ -18,6 +18,15 @@ export default function AdminSorteios() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState({ prize: '', allowRepeat: false });
   const [saving, setSaving] = useState(false);
+  // Editor administrativo (V9.6): editar, remover e configurar pesos.
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ prize: '', allowRepeat: false });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  const [removing, setRemoving] = useState(false);
+  const [weightsOpen, setWeightsOpen] = useState(false);
+  const [weightsForm, setWeightsForm] = useState({});
+  const [savingWeights, setSavingWeights] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [spinKey, setSpinKey] = useState(0);
   const [targetIndex, setTargetIndex] = useState(null);
@@ -87,6 +96,79 @@ export default function AdminSorteios() {
   const revealWinner = () => {
     setWinner((current) => current || pendingWinner);
     setPhase((p) => (p === 'spinning' ? 'done' : p));
+  };
+
+  const openEdit = () => {
+    if (!detail.data) return;
+    setEditForm({ prize: detail.data.prize, allowRepeat: !!detail.data.allowRepeat });
+    setEditOpen(true);
+  };
+
+  const submitEdit = async (e) => {
+    e.preventDefault();
+    setSavingEdit(true);
+    try {
+      await raffleApi.update(selectedId, { prize: editForm.prize, allowRepeat: editForm.allowRepeat });
+      toast.success('Sorteio atualizado.');
+      setEditOpen(false);
+      detail.reload();
+      raffles.reload();
+      elig.reload();
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const openWeights = () => {
+    const list = elig.data?.eligible || [];
+    const initial = {};
+    for (const p of list) initial[p.userId] = String(p.weight || 1);
+    setWeightsForm(initial);
+    setWeightsOpen(true);
+  };
+
+  const saveWeights = async (e) => {
+    e.preventDefault();
+    setSavingWeights(true);
+    try {
+      const payload = {};
+      for (const [userId, value] of Object.entries(weightsForm)) {
+        const n = Number(value);
+        if (!Number.isInteger(n) || n < 1 || n > 1000) {
+          throw new Error('Use um peso inteiro entre 1 e 1000.');
+        }
+        payload[userId] = n;
+      }
+      await raffleApi.setWeights(selectedId, payload);
+      toast.success('Pesos atualizados.');
+      setWeightsOpen(false);
+      elig.reload();
+    } catch (err) {
+      toast.error(getErrorMessage(err) || err.message);
+    } finally {
+      setSavingWeights(false);
+    }
+  };
+
+  const removeRaffle = async () => {
+    if (!confirmRemove) return;
+    setRemoving(true);
+    try {
+      await raffleApi.remove(confirmRemove.id);
+      toast.success('Sorteio removido. O histórico foi preservado.');
+      setConfirmRemove(null);
+      if (selectedId === confirmRemove.id) {
+        setSelectedId(null);
+        resetDraw();
+      }
+      raffles.reload();
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setRemoving(false);
+    }
   };
 
   const closeRaffle = async (id) => {
@@ -205,6 +287,9 @@ export default function AdminSorteios() {
               {raffle.status === 'OPEN' && (
                 <Button variant="secondary" onClick={() => closeRaffle(raffle.id)} disabled={busy}>Encerrar</Button>
               )}
+              <Button variant="secondary" onClick={openEdit} icon={<Pencil size={16} />} disabled={busy}>Editar</Button>
+              <Button variant="secondary" onClick={openWeights} icon={<SlidersHorizontal size={16} />} disabled={busy}>Probabilidades</Button>
+              <Button variant="danger" onClick={() => setConfirmRemove(raffle)} icon={<Trash2 size={16} />} disabled={busy}>Remover</Button>
             </div>
           </div>
 
@@ -295,6 +380,60 @@ export default function AdminSorteios() {
           <Button type="submit" loading={saving}>Criar sorteio</Button>
         </form>
       </Modal>
+
+      {/* Editor administrativo: editar dados suportados pelo sistema. */}
+      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Editar sorteio">
+        <form onSubmit={submitEdit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Field label="Prêmio" required>
+            <Input value={editForm.prize} onChange={(e) => setEditForm({ ...editForm, prize: e.target.value })} required minLength={2} />
+          </Field>
+          <Checkbox label="Permitir que o mesmo participante ganhe mais de uma vez neste sorteio" checked={editForm.allowRepeat} onChange={(e) => setEditForm({ ...editForm, allowRepeat: e.target.checked })} />
+          <Button type="submit" loading={savingEdit}>Salvar alterações</Button>
+        </form>
+      </Modal>
+
+      {/* Configuração administrativa de pesos/probabilidades (nunca visível em
+          páginas públicas; a rota é protegida no backend). */}
+      <Modal open={weightsOpen} onClose={() => setWeightsOpen(false)} title="Probabilidades do sorteio" size="md">
+        <form onSubmit={saveWeights} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p className="text-muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+            Defina o peso de cada participante elegível. O peso padrão é <strong>1</strong>; um peso <strong>5</strong> torna o
+            participante cinco vezes mais provável. Valores entre 1 e 1000. Esta configuração é exclusiva da organização.
+          </p>
+          {(elig.data?.eligible || []).length === 0 && <p className="text-muted">Nenhum participante elegível.</p>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 300, overflowY: 'auto' }}>
+            {(elig.data?.eligible || []).map((p) => (
+              <div className="flex-between" key={p.userId} style={{ gap: 12 }}>
+                <span>{p.name}</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  step={1}
+                  style={{ maxWidth: 110 }}
+                  value={weightsForm[p.userId] ?? '1'}
+                  onChange={(e) => setWeightsForm((prev) => ({ ...prev, [p.userId]: e.target.value }))}
+                  aria-label={`Peso de ${p.name}`}
+                />
+              </div>
+            ))}
+          </div>
+          <Button type="submit" loading={savingWeights} disabled={(elig.data?.eligible || []).length === 0}>Salvar probabilidades</Button>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!confirmRemove}
+        title="Remover sorteio"
+        message={confirmRemove
+          ? `O sorteio "${confirmRemove.prize}" será removido. O histórico de vencedores e a auditoria são preservados; o sorteio deixa de aparecer na listagem e nos resultados públicos.`
+          : ''}
+        confirmLabel="Remover"
+        danger
+        loading={removing}
+        onConfirm={removeRaffle}
+        onClose={() => setConfirmRemove(null)}
+      />
     </div>
   );
 }

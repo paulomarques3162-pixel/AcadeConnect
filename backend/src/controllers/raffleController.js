@@ -36,3 +36,18 @@ export const setStatus = asyncHandler(async (req, res) => {
   const raffle = await svc.setRaffleStatus(req.params.id, req.body.status, req.user.id);
   return apiResponse(res, { message: 'Status do sorteio atualizado.', data: { raffle } });
 });
+
+export const update = asyncHandler(async (req, res) => {
+  const raffle = await svc.updateRaffle(req.params.id, req.body, req.user.id);
+  return apiResponse(res, { message: 'Sorteio atualizado.', data: { raffle } });
+});
+
+export const remove = asyncHandler(async (req, res) => {
+  const data = await svc.removeRaffle(req.params.id, req.user.id);
+  return apiResponse(res, { message: 'Sorteio removido.', data });
+});
+
+export const setWeights = asyncHandler(async (req, res) => {
+  const data = await svc.setRaffleWeights(req.params.id, req.body.weights, req.user.id);
+  return apiResponse(res, { message: 'Pesos atualizados.', data });
+});

@@ -148,6 +148,7 @@ export const adminApi = {
   createInstitution: (data) => api.post('/admin/institutions', data).then(unwrap),
   deleteInstitution: (id) => api.delete(`/admin/institutions/${id}`).then(unwrap),
   logs: (params) => api.get('/admin/logs', { params }).then(unwrap),
+  updateContact: (data) => api.put('/admin/settings/contact', data).then(unwrap),
   reports: (params) => api.get('/admin/reports', { params }).then(unwrap),
   broadcast: (data) => api.post('/admin/notifications/broadcast', data).then(unwrap),
   exportUrl: '/admin/export',
@@ -177,8 +178,16 @@ export const raffleApi = {
   get: (id) => api.get(`/raffles/${id}`).then(unwrap),
   eligible: (id) => api.get(`/raffles/${id}/eligible`).then(unwrap),
   create: (data) => api.post('/raffles', data).then(unwrap),
+  update: (id, data) => api.put(`/raffles/${id}`, data).then(unwrap),
+  remove: (id) => api.delete(`/raffles/${id}`).then(unwrap),
+  setWeights: (id, weights) => api.put(`/raffles/${id}/weights`, { weights }).then(unwrap),
   draw: (id) => api.post(`/raffles/${id}/draw`).then(unwrap),
   setStatus: (id, status) => api.post(`/raffles/${id}/status`, { status }).then(unwrap),
+};
+
+// ---- Configurações públicas (contato) ----
+export const settingApi = {
+  contact: () => api.get('/settings/contact').then(unwrap),
 };
 
 // ---- Products ----

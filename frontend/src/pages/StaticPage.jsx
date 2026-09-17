@@ -1,3 +1,6 @@
+import { settingApi } from '../api/services';
+import { useApi } from '../hooks/useApi';
+
 const CONTENT = {
   'como-funciona': {
     title: 'Como funciona',
@@ -67,13 +70,50 @@ const CONTENT = {
   },
 };
 
+// Escapa valores vindos do banco antes de injetá-los no HTML da página
+// (os campos são administrativos, mas a defesa em profundidade é barata).
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function contactBody(contact = {}) {
+  const lines = [];
+  const push = (label, value, href) => {
+    if (!value) return;
+    const safe = escapeHtml(value);
+    lines.push(`${label}: ${href ? `<a href="${escapeHtml(href)}">${safe}</a>` : `<strong>${safe}</strong>`}`);
+  };
+  push('E-mail', contact.email, contact.email ? `mailto:${contact.email}` : null);
+  push('Telefone', contact.phone, contact.phone ? `tel:${contact.phone.replace(/[^+\d]/g, '')}` : null);
+  push('WhatsApp', contact.whatsapp, contact.whatsapp ? `https://wa.me/${contact.whatsapp.replace(/[^\d]/g, '')}` : null);
+  push('Endereço', contact.address);
+  push('Atendimento', contact.hours);
+  push('Instagram', contact.instagram, contact.instagram ? `https://instagram.com/${contact.instagram.replace(/^@/, '')}` : null);
+  push('Facebook', contact.facebook, contact.facebook ? `https://facebook.com/${contact.facebook}` : null);
+  push('YouTube', contact.youtube, contact.youtube ? `https://youtube.com/${contact.youtube}` : null);
+  return `<p>Dúvidas, sugestões ou suporte? Fale conosco.</p><p>${lines.join('<br/>') || 'Informações de contato em atualização.'}</p><p>Nossa equipe responde em até 48 horas úteis.</p>`;
+}
+
 export default function StaticPage({ page }) {
-  const content = CONTENT[page] || { title: 'Página', body: '<p>Conteúdo indisponível.</p>' };
+  // A página de contato é alimentada pela configuração administrativa (com
+  // cache curto no backend), permitindo alterar os dados sem tocar no código.
+  const contactQuery = useApi(
+    () => (page === 'contato' ? settingApi.contact().then((r) => r.data.contact) : Promise.resolve(null)),
+    [page]
+  );
+  const base = CONTENT[page] || { title: 'Página', body: '<p>Conteúdo indisponível.</p>' };
+  const content = page === 'contato' ? { title: base.title, body: contactBody(contactQuery.data || {}) } : base;
+
   return (
     <div className="container" style={{ maxWidth: 760, paddingTop: 48, paddingBottom: 48 }}>
       <h1 style={{ fontSize: '2rem', marginBottom: 20 }}>{content.title}</h1>
       <div className="static-content" dangerouslySetInnerHTML={{ __html: content.body }} />
-      <style>{`.static-content h2{font-size:1.25rem;margin:22px 0 8px;color:var(--brand)} .static-content p{color:var(--text-muted);line-height:1.7}`}</style>
+      <style>{`.static-content h2{font-size:1.25rem;margin:22px 0 8px;color:var(--brand)} .static-content p{color:var(--text-muted);line-height:1.7} .static-content a{color:var(--brand)}`}</style>
     </div>
   );
 }
